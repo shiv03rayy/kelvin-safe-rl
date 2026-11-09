@@ -8,6 +8,7 @@ Kelvin is an open-source research prototype for **safety-constrained control und
 
 The project compares a standard RL agent (PPO with a fixed cost penalty) against a constrained one (PPO-Lagrangian) and against classical controllers, with every configuration run over multiple random seeds.
 
+SEE IT LIVE HERE: https://claude.ai/artifact/4kKdHeLqXL3jvY4EJngq76
 ---
 
 ## Contents
