@@ -229,13 +229,15 @@ transcription rather than a translation.
       "dt_ctrl_s": 10.0, "dt_phys_s": 1.0, "sensor_cells": [0, 3]
     },
     "run": {
-      "controller": "ppo_lagrangian", "obs_mode": "estimated",
+      "controller": "ppo_lagrangian", "controller_params": {},
+      "obs_mode": "estimated",
       "seed": 0, "split": "test", "profile_index": 7, "mismatch_scale": 1.0
     },
     "source_csv": "results/e3/ppo_lagrangian_estimated_seed0_test07.csv"
   },
   "episode": {
     "n_steps": 360,
+    "initial": { "t_s": 0.0, "T_cells_C": [], "mdot": 0.0 },
     "summary": {
       "pump_energy_kJ": 0.0, "peak_T_C": 0.0, "pct_steps_violating": 0.0,
       "degree_s_above": 0.0, "max_spread_K": 0.0, "return": 0.0, "cost_total": 0.0
@@ -269,6 +271,22 @@ Rules:
   itself.
 - `meta.git_commit` and `meta.config_sha256` are mandatory, and the viewer displays them. Any number
   on screen can be traced back to the commit and config that produced it.
+- **`config_sha256` is taken over LF-normalised bytes**, not the file as it sits on disk. Hashing
+  raw bytes makes the value depend on whether the checkout is CRLF or LF, so the same config would
+  hash differently on Windows and on Linux CI — which is precisely where the hash would be trusted.
+- **A controller's parameters live in `controller_params`, never in its name.** `controller` is the
+  bare family (`constant`, `thermostat`, `pid`, `ppo_lagrangian`) and `controller_params` carries
+  the arguments (`{"action": 0.3}`), empty for a controller that takes none. Encoding arguments into
+  the name would force the viewer to parse a string to recover them.
+- **`episode.initial` records the reset state**, because `t_s` begins at the end of the first
+  control step and the series must all stay `n_steps` long. Without it the opening beat would start
+  one step after the pack was at rest.
+- **`series.sensors` is reconstructed, not logged.** The environment does not record sensor
+  readings; they exist only inside the observation vector in scaled form. The exporter inverts that
+  scaling, which recovers exactly what the controller saw, with a round-trip error of order 1e-5 K
+  from float32 observations. Under `full` the environment adds no noise, so these equal the truth at
+  the sensed cells. If the environment later logs the readings directly, this block becomes a copy
+  and the caveat disappears.
 - A `traces/manifest.json` indexes available traces by controller, observation mode, seed and
   profile, so lab mode's selector is generated rather than hardcoded.
 - The schema version bumps on any breaking change, and the loader refuses an unknown major version
@@ -339,7 +357,7 @@ Motion here is explanatory, so it gets the same discipline as colour.
 
 ## Architecture
 
-```
+```text
 viz/
 ├── index.html
 ├── src/
