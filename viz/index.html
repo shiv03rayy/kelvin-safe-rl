@@ -1,0 +1,734 @@
+<title>Kelvin Pack Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* Layout: instrument panel — a 3D stage with a telemetry rail beneath it, stacking to one column on phones. */
+:root {
+  /* dark-first: the pack is emissive and reads against a dark ground */
+  --bg: #0b0d11;
+  --surface: #13161c;
+  --surface-2: #1a1e26;
+  --line: #262c37;
+  --ink: #e8eaee;
+  --ink-2: #a2a9b6;
+  --ink-3: #6f7784;
+  --accent: #4ea3c4;
+  --alarm: #ff4b3a;
+  --ok: #4fb286;
+  --grid: #1f242d;
+  --scene-top: #0e1218;
+  --scene-bottom: #05070a;
+  color-scheme: dark;
+
+  --f-display: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #eceef2;
+    --line: #d7dbe2;
+    --ink: #161a20;
+    --ink-2: #4a515e;
+    --ink-3: #79818f;
+    --accent: #1f6f8f;
+    --alarm: #c62a1b;
+    --ok: #2d7a57;
+    --grid: #e2e5ea;
+    --scene-top: #dfe3e9;
+    --scene-bottom: #c6ccd5;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eceef2;
+  --line: #d7dbe2;
+  --ink: #161a20;
+  --ink-2: #4a515e;
+  --ink-3: #79818f;
+  --accent: #1f6f8f;
+  --alarm: #c62a1b;
+  --ok: #2d7a57;
+  --grid: #e2e5ea;
+  --scene-top: #dfe3e9;
+  --scene-bottom: #c6ccd5;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 28px;
+  line-height: 1.5;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+/* ---------- header ---------- */
+header { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: flex-end; justify-content: space-between; }
+.brand { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.brand h1 {
+  font-family: var(--f-display);
+  font-size: clamp(26px, 4.4vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  margin: 0;
+  text-wrap: balance;
+}
+.brand p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 62ch; }
+.eyebrow {
+  font-family: var(--f-display);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ---------- controls ---------- */
+.rail { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+label.sel { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-3);
+  font-family: var(--f-display); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
+select, button {
+  font-family: var(--f-body); font-size: 13px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 11px; cursor: pointer;
+}
+select { min-width: 0; max-width: 100%; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, .track:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root[data-theme="light"] button[aria-pressed="true"], :root:not([data-theme="dark"]) button[aria-pressed="true"] { color: #fff; }
+.seg { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+
+/* ---------- stage ---------- */
+.stage {
+  position: relative; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; min-height: 320px;
+}
+#scene { display: block; width: 100%; height: clamp(320px, 52vh, 520px); touch-action: none; }
+.hud {
+  position: absolute; left: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px;
+  pointer-events: none; max-width: calc(100% - 24px);
+}
+.chip {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.02em;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 7px; color: var(--ink-2);
+  width: fit-content;
+}
+.chip strong { color: var(--ink); font-weight: 600; }
+.chip.danger { color: #fff; background: var(--alarm); border-color: var(--alarm); }
+.hint {
+  position: absolute; right: 12px; bottom: 10px; font-size: 11px; color: var(--ink-3);
+  pointer-events: none; font-family: var(--f-mono);
+}
+
+/* ---------- telemetry ---------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; min-width: 0; }
+.tile .k { font-family: var(--f-display); font-size: 10px; font-weight: 600; letter-spacing: 0.11em;
+  text-transform: uppercase; color: var(--ink-3); }
+.tile .v { font-family: var(--f-mono); font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums;
+  margin-top: 1px; white-space: nowrap; }
+.tile .u { font-size: 12px; color: var(--ink-3); }
+.tile.breach .v { color: var(--alarm); }
+
+.charts { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 6px; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.chart-head h2 { font-family: var(--f-display); font-size: 12px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 2px; }
+.chart-head .read { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+svg.plot { display: block; width: 100%; height: 92px; touch-action: none; cursor: crosshair; }
+svg.plot.flow { height: 58px; }
+
+footer { color: var(--ink-3); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+footer code { font-family: var(--f-mono); color: var(--ink-2); }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-3); font-family: var(--f-mono); }
+.ramp { height: 8px; width: 120px; border-radius: 3px; border: 1px solid var(--line); }
+.loading { padding: 28px 16px; text-align: center; color: var(--ink-2); font-family: var(--f-mono); font-size: 13px; }
+
+@media (max-width: 560px) {
+  .tile .v { font-size: 17px; }
+  .rail { gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="eyebrow">Kelvin · M1 environment</span>
+      <h1>Pack Viewer</h1>
+      <p>Eight lithium cells along one coolant channel. Coolant enters at cell 1 and warms as it travels, so the
+         last cell runs hottest &mdash; and it is not one of the two that has a sensor.</p>
+    </div>
+    <div class="rail">
+      <label class="sel">Logged run
+        <select id="traceSel"></select>
+      </label>
+    </div>
+  </header>
+
+  <div class="rail">
+    <div class="seg" role="group" aria-label="View preset">
+      <button id="beatHeat" aria-pressed="false">Heat</button>
+      <button id="beatCool" aria-pressed="true">Cooling</button>
+      <button id="beatBlind" aria-pressed="false">Blindness</button>
+    </div>
+    <div class="seg" role="group" aria-label="Playback">
+      <button id="playBtn" aria-pressed="true">Pause</button>
+      <button id="speedBtn">1&times;</button>
+      <button id="restartBtn">Restart</button>
+    </div>
+    <button id="themeBtn" title="Switch theme">Theme</button>
+  </div>
+
+  <div class="stage">
+    <canvas id="scene" aria-label="Three-dimensional view of the battery pack; cell height and colour follow temperature"></canvas>
+    <div class="hud">
+      <div class="chip" id="chipTime">t <strong>00:00</strong> of 60:00</div>
+      <div class="chip" id="chipFlow">flow <strong>&mdash;</strong></div>
+      <div class="chip" id="chipState">&mdash;</div>
+    </div>
+    <div class="hint" id="hint">drag to orbit</div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Hottest cell</div><div class="v" id="tPeak">&mdash;</div></div>
+    <div class="tile"><div class="k">Coolant out</div><div class="v" id="tCool">&mdash;</div></div>
+    <div class="tile"><div class="k">Pump energy</div><div class="v" id="tPump">&mdash;</div></div>
+    <div class="tile"><div class="k">Degree-seconds over</div><div class="v" id="tCost">&mdash;</div></div>
+    <div class="tile"><div class="k">Spread across pack</div><div class="v" id="tSpread">&mdash;</div></div>
+  </div>
+
+  <div class="charts">
+    <div class="chart-head">
+      <h2>Hottest cell temperature</h2>
+      <div class="read" id="plotRead">drag to scrub</div>
+    </div>
+    <svg class="plot" id="plotT" preserveAspectRatio="none" role="img" aria-label="Hottest cell temperature over the episode"></svg>
+    <div class="chart-head"><h2>Coolant flow</h2><div class="read" id="flowRead"></div></div>
+    <svg class="plot flow" id="plotF" preserveAspectRatio="none" role="img" aria-label="Coolant mass flow over the episode"></svg>
+  </div>
+
+  <footer>
+    <span class="legend">30 &deg;C <span class="ramp" id="rampSwatch"></span> 45 &deg;C+</span>
+    <span id="provenance">&mdash;</span>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ------------------------------------------------------------------ constants
+  // Fixed colour domain. Never fitted per run: rescaling to each run's own range
+  // would make a safe episode and a dangerous one look identical.
+  var T_LO = 30, T_HI = 45;
+  var H_LO = 0.45, H_HI = 3.0;     // cell height at T_LO and at T_HI
+  var CELL_W = 1.0, GAP = 0.16;
+
+  // Sequential heat ramp: lightness rises monotonically, no hue cycling.
+  var RAMP = [
+    [0.00, [0x35, 0x41, 0x4f]],
+    [0.20, [0x5a, 0x5a, 0x63]],
+    [0.40, [0x8a, 0x63, 0x55]],
+    [0.60, [0xb8, 0x73, 0x44]],
+    [0.80, [0xe0, 0x8a, 0x35]],
+    [1.00, [0xff, 0xab, 0x2e]]
+  ];
+  var OVER = [0xff, 0x4b, 0x3a];
+
+  function rampAt(t) {
+    if (t >= 1) return OVER.slice();
+    if (t < 0) t = 0;
+    for (var i = 1; i < RAMP.length; i++) {
+      if (t <= RAMP[i][0]) {
+        var a = RAMP[i - 1], b = RAMP[i];
+        var f = (t - a[0]) / (b[0] - a[0]);
+        return [0, 1, 2].map(function (c) { return Math.round(a[1][c] + f * (b[1][c] - a[1][c])); });
+      }
+    }
+    return RAMP[RAMP.length - 1][1].slice();
+  }
+  function tempColor(T) { return rampAt((T - T_LO) / (T_HI - T_LO)); }
+  function hex(rgb) { return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]; }
+  function css(rgb) { return "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")"; }
+
+  function tok(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  // ------------------------------------------------------------------ state
+  var S = {
+    manifest: null, trace: null, frame: 0, playing: true, speed: 1,
+    beat: "cool", stepsPerSec: 60, dragging: false
+  };
+
+  var el = {};
+  ["traceSel", "playBtn", "speedBtn", "restartBtn", "themeBtn", "beatHeat", "beatCool", "beatBlind",
+   "chipTime", "chipFlow", "chipState", "tPeak", "tCool", "tPump", "tCost", "tSpread",
+   "plotT", "plotF", "plotRead", "flowRead", "provenance", "rampSwatch", "hint", "scene"
+  ].forEach(function (id) { el[id] = document.getElementById(id); });
+
+  el.rampSwatch.style.background = "linear-gradient(90deg," + RAMP.map(function (s) {
+    return css(s[1]) + " " + (s[0] * 100) + "%";
+  }).join(",") + ")";
+
+  // ------------------------------------------------------------------ three.js scene
+  var renderer, scene, camera, cells = [], plate, limitPlane, beacons = [], particles, pGeomCount = 140;
+  var pack = new THREE.Group();
+  var orbit = { az: -0.62, el: 0.42, r: 13.5, tAz: -0.62, tEl: 0.42, tR: 13.5 };
+  var nCells = 8, packLen = 0;
+
+  function initScene() {
+    renderer = new THREE.WebGLRenderer({ canvas: el.scene, antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(42, 2, 0.1, 200);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.62));
+    var key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(4, 9, 6); scene.add(key);
+    var rim = new THREE.DirectionalLight(0x88bbff, 0.35); rim.position.set(-6, 3, -5); scene.add(rim);
+    scene.add(pack);
+    applySceneTheme();
+  }
+
+  function applySceneTheme() {
+    if (!renderer) return;
+    var bg = new THREE.Color(tok("--scene-bottom") || "#05070a");
+    scene.background = bg;
+    scene.fog = new THREE.Fog(bg.getHex(), 18, 38);
+  }
+
+  function buildPack(n) {
+    while (pack.children.length) pack.remove(pack.children[0]);
+    cells = []; beacons = [];
+    nCells = n;
+    packLen = n * CELL_W + (n - 1) * GAP;
+    var x0 = -packLen / 2 + CELL_W / 2;
+
+    // cold plate the coolant runs through, beneath the cells
+    var plateGeo = new THREE.BoxGeometry(packLen + 0.7, 0.22, 1.5);
+    plate = new THREE.Mesh(plateGeo, new THREE.MeshStandardMaterial({
+      color: 0x2b3340, roughness: 0.85, metalness: 0.1
+    }));
+    plate.position.set(0, -0.14, 0);
+    pack.add(plate);
+
+    for (var i = 0; i < n; i++) {
+      var geo = new THREE.BoxGeometry(CELL_W, 1, CELL_W);
+      geo.translate(0, 0.5, 0); // grow upward from the plate
+      var mat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5, metalness: 0.15, transparent: true, opacity: 1 });
+      var m = new THREE.Mesh(geo, mat);
+      m.position.set(x0 + i * (CELL_W + GAP), 0, 0);
+      pack.add(m);
+      cells.push(m);
+
+      var wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0x8fa3b8, wireframe: true, transparent: true, opacity: 0
+      }));
+      wire.position.copy(m.position);
+      pack.add(wire);
+      m.userData.wire = wire;
+    }
+
+    // the T_max plane, as real geometry cells can poke through
+    var pg = new THREE.PlaneGeometry(packLen + 1.6, 2.6);
+    limitPlane = new THREE.Mesh(pg, new THREE.MeshBasicMaterial({
+      color: 0xff4b3a, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false
+    }));
+    limitPlane.rotation.x = -Math.PI / 2;
+    limitPlane.position.y = H_HI;
+    pack.add(limitPlane);
+
+    var edge = new THREE.Mesh(new THREE.BoxGeometry(packLen + 1.6, 0.015, 0.015),
+      new THREE.MeshBasicMaterial({ color: 0xff4b3a, transparent: true, opacity: 0.8 }));
+    edge.position.set(0, H_HI, 1.3); pack.add(edge);
+
+    // coolant particles
+    var pg2 = new THREE.BoxGeometry(0.1, 0.07, 0.07);
+    particles = new THREE.InstancedMesh(pg2, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95 }), pGeomCount);
+    particles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    pack.add(particles);
+    for (var p = 0; p < pGeomCount; p++) particles.setColorAt(p, new THREE.Color(0x4ea3c4));
+    particles.userData.phase = new Float32Array(pGeomCount).map(function () { return Math.random(); });
+    for (var q = 0; q < pGeomCount; q++) particles.userData.phase[q] = Math.random();
+
+    // sensor beacons (added once a trace says which cells are sensed)
+    pack.userData.beaconHolder = new THREE.Group();
+    pack.add(pack.userData.beaconHolder);
+  }
+
+  function buildBeacons(idx) {
+    var holder = pack.userData.beaconHolder;
+    while (holder.children.length) holder.remove(holder.children[0]);
+    beacons = [];
+    var x0 = -packLen / 2 + CELL_W / 2;
+    idx.forEach(function (i) {
+      var g = new THREE.Group();
+      var post = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.5, 0.04),
+        new THREE.MeshBasicMaterial({ color: 0x4ea3c4 }));
+      post.position.y = 0.25;
+      var bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 10),
+        new THREE.MeshBasicMaterial({ color: 0x7fd4ef }));
+      bulb.position.y = 0.56;
+      g.add(post); g.add(bulb);
+      g.position.set(x0 + i * (CELL_W + GAP), 0, 0.85);
+      g.userData.bulb = bulb;
+      g.userData.cell = i;
+      holder.add(g);
+      beacons.push(g);
+    });
+  }
+
+  function resize() {
+    if (!renderer) return;
+    var w = el.scene.clientWidth, h = el.scene.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+
+  // ------------------------------------------------------------------ beats
+  var BEATS = {
+    heat:  { az: -0.15, el: 0.10, r: 11.0, coolant: false, ghost: false, sensors: false },
+    cool:  { az: -0.62, el: 0.42, r: 13.5, coolant: true,  ghost: false, sensors: false },
+    blind: { az: -0.30, el: 0.06, r: 10.0, coolant: true,  ghost: true,  sensors: true }
+  };
+  function setBeat(name) {
+    S.beat = name;
+    var b = BEATS[name];
+    orbit.tAz = b.az; orbit.tEl = b.el; orbit.tR = b.r;
+    el.beatHeat.setAttribute("aria-pressed", String(name === "heat"));
+    el.beatCool.setAttribute("aria-pressed", String(name === "cool"));
+    el.beatBlind.setAttribute("aria-pressed", String(name === "blind"));
+    el.hint.textContent = name === "blind"
+      ? "ghosted cells are invisible to the controller"
+      : (name === "heat" ? "height and colour both follow temperature" : "drag to orbit");
+  }
+
+  // ------------------------------------------------------------------ data
+  function basePaths() { return ["traces/", "../results/traces/"]; }
+
+  function fetchFirst(suffix) {
+    var paths = basePaths();
+    return paths.reduce(function (chain, base) {
+      return chain.catch(function () {
+        return fetch(base + suffix).then(function (r) {
+          if (!r.ok) throw new Error(r.status);
+          return r.json().then(function (j) { return { base: base, json: j }; });
+        });
+      });
+    }, Promise.reject());
+  }
+
+  function loadManifest() {
+    return fetchFirst("manifest.json").then(function (res) {
+      S.manifest = res.json; S.base = res.base;
+      var ts = res.json.traces.slice().sort(function (a, b) {
+        return (a.profile_index - b.profile_index) || (a.controller_params.action - b.controller_params.action);
+      });
+      S.manifest.traces = ts;
+      el.traceSel.innerHTML = "";
+      ts.forEach(function (t, i) {
+        var o = document.createElement("option");
+        var mdot = t.controller_params.action;
+        o.value = String(i);
+        o.textContent = "profile " + t.profile_index + " · constant flow " + mdot;
+        el.traceSel.appendChild(o);
+      });
+      var start = ts.findIndex(function (t) { return t.controller_params.action === 0.1; });
+      el.traceSel.value = String(start >= 0 ? start : 0);
+      return loadTrace(start >= 0 ? start : 0);
+    });
+  }
+
+  function loadTrace(i) {
+    var meta = S.manifest.traces[i];
+    return fetch(S.base + meta.file).then(function (r) { return r.json(); }).then(function (tr) {
+      S.trace = tr; S.frame = 0;
+      var n = tr.meta.env.n_cells;
+      if (nCells !== n || !cells.length) buildPack(n);
+      buildBeacons(tr.meta.env.sensor_cells || []);
+      drawPlots();
+      el.provenance.innerHTML = "source <code>" + meta.file + "</code> · commit <code>" +
+        tr.meta.git_commit + "</code> · config <code>" + tr.meta.config_sha256.slice(0, 12) + "</code> · " +
+        tr.episode.n_steps + " control steps";
+      render(true);
+    });
+  }
+
+  // ------------------------------------------------------------------ plots
+  var PW = 1000, PH_T = 100, PH_F = 60, PAD = 16;
+  function drawPlots() {
+    var tr = S.trace, n = tr.episode.n_steps;
+    var peak = tr.series.T_peak_substep_C;
+    var lo = T_LO - 1, hi = Math.max(T_HI + 2, Math.max.apply(null, peak) + 1.5);
+    var x = function (i) { return PAD + (i / (n - 1)) * (PW - 2 * PAD); };
+    var yT = function (v) { return PH_T - PAD / 2 - ((v - lo) / (hi - lo)) * (PH_T - PAD); };
+
+    var pts = peak.map(function (v, i) { return x(i).toFixed(1) + "," + yT(v).toFixed(1); }).join(" ");
+    var yMax = yT(T_HI);
+    var ink3 = tok("--ink-3"), grid = tok("--grid"), alarm = tok("--alarm"), accent = tok("--accent");
+
+    el.plotT.setAttribute("viewBox", "0 0 " + PW + " " + PH_T);
+    el.plotT.innerHTML =
+      '<rect x="0" y="0" width="' + PW + '" height="' + yMax + '" fill="' + alarm + '" opacity="0.07"/>' +
+      '<line x1="' + PAD + '" y1="' + yMax + '" x2="' + (PW - PAD) + '" y2="' + yMax +
+        '" stroke="' + alarm + '" stroke-width="1.5" stroke-dasharray="6 4"/>' +
+      '<text x="' + (PAD + 4) + '" y="' + (yMax - 5) + '" fill="' + alarm +
+        '" font-family="IBM Plex Mono, monospace" font-size="11">T_max 45 °C</text>' +
+      '<polyline points="' + pts + '" fill="none" stroke="' + accent +
+        '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<text x="' + PAD + '" y="' + (PH_T - 2) + '" fill="' + ink3 +
+        '" font-family="IBM Plex Mono, monospace" font-size="10">0 min</text>' +
+      '<text x="' + (PW - PAD) + '" y="' + (PH_T - 2) + '" text-anchor="end" fill="' + ink3 +
+        '" font-family="IBM Plex Mono, monospace" font-size="10">60 min</text>' +
+      '<line id="phT" x1="0" y1="0" x2="0" y2="' + PH_T + '" stroke="' + ink3 + '" stroke-width="1.5"/>' +
+      '<circle id="dotT" r="4" fill="' + accent + '" stroke="' + tok("--surface") + '" stroke-width="2"/>';
+
+    var flow = tr.series.mdot, fmax = tr.meta.env.mdot_max;
+    var yF = function (v) { return PH_F - PAD / 2 - (v / fmax) * (PH_F - PAD); };
+    var fpts = flow.map(function (v, i) { return x(i).toFixed(1) + "," + yF(v).toFixed(1); }).join(" ");
+    el.plotF.setAttribute("viewBox", "0 0 " + PW + " " + PH_F);
+    el.plotF.innerHTML =
+      '<polyline points="' + fpts + '" fill="none" stroke="' + ink3 + '" stroke-width="2"/>' +
+      '<line x1="' + PAD + '" y1="' + yF(0) + '" x2="' + (PW - PAD) + '" y2="' + yF(0) +
+        '" stroke="' + grid + '" stroke-width="1"/>' +
+      '<line id="phF" x1="0" y1="0" x2="0" y2="' + PH_F + '" stroke="' + ink3 + '" stroke-width="1.5"/>';
+
+    S._x = x; S._yT = yT;
+  }
+
+  function updatePlayhead() {
+    var tr = S.trace; if (!tr || !S._x) return;
+    var i = S.frame, px = S._x(i);
+    var phT = document.getElementById("phT"), dot = document.getElementById("dotT"),
+        phF = document.getElementById("phF");
+    if (phT) { phT.setAttribute("x1", px); phT.setAttribute("x2", px); }
+    if (phF) { phF.setAttribute("x1", px); phF.setAttribute("x2", px); }
+    if (dot) { dot.setAttribute("cx", px); dot.setAttribute("cy", S._yT(tr.series.T_peak_substep_C[i])); }
+  }
+
+  function scrubFrom(ev, svg) {
+    var r = svg.getBoundingClientRect();
+    var cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
+    var f = (cx / r.width) * PW;
+    var n = S.trace.episode.n_steps;
+    var i = Math.round(((f - PAD) / (PW - 2 * PAD)) * (n - 1));
+    S.frame = Math.max(0, Math.min(n - 1, i));
+    render(true);
+  }
+  [el.plotT, el.plotF].forEach(function (svg) {
+    svg.addEventListener("pointerdown", function (e) {
+      if (!S.trace) return;
+      S.dragging = true; svg.setPointerCapture(e.pointerId); scrubFrom(e, svg);
+    });
+    svg.addEventListener("pointermove", function (e) { if (S.dragging && S.trace) scrubFrom(e, svg); });
+    svg.addEventListener("pointerup", function (e) { S.dragging = false; try { svg.releasePointerCapture(e.pointerId); } catch (x) {} });
+  });
+
+  // ------------------------------------------------------------------ render
+  function fmtClock(sec) {
+    var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+    return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
+  }
+
+  function render(force) {
+    var tr = S.trace; if (!tr) return;
+    var i = S.frame, se = tr.series, env = tr.meta.env;
+    var T = se.T_cells_C[i], Tc = se.T_coolant_C[i];
+    var beat = BEATS[S.beat];
+    var sensed = env.sensor_cells || [];
+
+    var peak = -Infinity, minT = Infinity;
+    for (var c = 0; c < T.length; c++) { if (T[c] > peak) peak = T[c]; if (T[c] < minT) minT = T[c]; }
+
+    for (var k = 0; k < cells.length; k++) {
+      var m = cells[k], t = T[k];
+      var h = H_LO + ((t - T_LO) / (T_HI - T_LO)) * (H_HI - H_LO);
+      m.scale.y = Math.max(0.05, h);
+      var rgb = tempColor(t);
+      m.material.color.setHex(hex(rgb));
+      var over = Math.max(0, t - env.T_max_C);
+      m.material.emissive = m.material.emissive || new THREE.Color();
+      m.material.emissive.setHex(over > 0 ? 0xff2a18 : hex(rgb));
+      m.material.emissiveIntensity = over > 0 ? Math.min(1, 0.25 + over / 4) : 0.06;
+
+      var ghosted = beat.ghost && sensed.indexOf(k) === -1;
+      m.material.opacity = ghosted ? 0.13 : 1;
+      m.userData.wire.scale.y = m.scale.y;
+      m.userData.wire.material.opacity = ghosted ? 0.5 : 0;
+    }
+
+    limitPlane.visible = true;
+    limitPlane.material.opacity = peak > env.T_max_C ? 0.26 : 0.1;
+
+    // coolant particles
+    particles.visible = beat.coolant;
+    if (beat.coolant) {
+      var mdot = se.mdot[i];
+      var frac = (mdot - env.mdot_min) / (env.mdot_max - env.mdot_min);
+      var mtx = new THREE.Matrix4(), col = new THREE.Color();
+      var now = performance.now() / 1000;
+      for (var p = 0; p < pGeomCount; p++) {
+        var ph = (particles.userData.phase[p] + now * (0.08 + frac * 0.75)) % 1;
+        var px = -packLen / 2 - 0.3 + ph * (packLen + 0.6);
+        var lane = (p % 5 - 2) * 0.22;
+        mtx.makeTranslation(px, -0.14, lane);
+        particles.setMatrixAt(p, mtx);
+        var seg = Math.min(Tc.length - 1, Math.max(0, Math.floor(((px + packLen / 2) / packLen) * Tc.length)));
+        var crgb = tempColor(Tc[seg]);
+        col.setHex(hex(crgb));
+        particles.setColorAt(p, col);
+      }
+      particles.instanceMatrix.needsUpdate = true;
+      if (particles.instanceColor) particles.instanceColor.needsUpdate = true;
+    }
+
+    // sensor beacons
+    pack.userData.beaconHolder.visible = beat.sensors;
+    if (beat.sensors && se.sensors) {
+      beacons.forEach(function (g, bi) {
+        var reading = se.sensors.cells_C[i][bi];
+        var rgb2 = tempColor(reading);
+        g.userData.bulb.material.color.setHex(hex(rgb2));
+        var hh = H_LO + ((reading - T_LO) / (T_HI - T_LO)) * (H_HI - H_LO);
+        g.children[0].scale.y = Math.max(0.1, hh / 0.5);
+        g.userData.bulb.position.y = Math.max(0.12, hh) + 0.14;
+      });
+    }
+
+    // readouts
+    var tsec = se.t_s[i];
+    el.chipTime.innerHTML = "t <strong>" + fmtClock(tsec) + "</strong> of 60:00";
+    el.chipFlow.innerHTML = "flow <strong>" + (se.mdot[i] * 1000).toFixed(1) + " g/s</strong>";
+    var breached = peak > env.T_max_C;
+    el.chipState.className = "chip" + (breached ? " danger" : "");
+    el.chipState.innerHTML = breached
+      ? "OVER LIMIT by " + (peak - env.T_max_C).toFixed(2) + " K"
+      : "within limit · " + (env.T_max_C - peak).toFixed(2) + " K margin";
+
+    var cumPump = 0, cumCost = 0;
+    for (var j = 0; j <= i; j++) { cumPump += se.pump_energy_J[j]; cumCost += se.cost[j]; }
+    el.tPeak.innerHTML = peak.toFixed(2) + ' <span class="u">°C</span>';
+    el.tPeak.parentElement.classList.toggle("breach", breached);
+    el.tCool.innerHTML = Tc[Tc.length - 1].toFixed(2) + ' <span class="u">°C</span>';
+    el.tPump.innerHTML = (cumPump / 1000).toFixed(2) + ' <span class="u">kJ</span>';
+    el.tCost.innerHTML = (cumCost * env.dt_ctrl_s).toFixed(0) + ' <span class="u">K·s</span>';
+    el.tCost.parentElement.classList.toggle("breach", cumCost > 0);
+    el.tSpread.innerHTML = (peak - minT).toFixed(2) + ' <span class="u">K</span>';
+    el.plotRead.textContent = fmtClock(tsec) + " · hottest " + peak.toFixed(2) + " °C";
+    el.flowRead.textContent = (se.mdot[i] * 1000).toFixed(1) + " g/s of " + (env.mdot_max * 1000).toFixed(0) + " max";
+
+    updatePlayhead();
+  }
+
+  // ------------------------------------------------------------------ loop
+  var last = performance.now(), acc = 0;
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced) S.playing = false;
+
+  function tick(now) {
+    requestAnimationFrame(tick);
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+
+    orbit.az += (orbit.tAz - orbit.az) * Math.min(1, dt * 3.2);
+    orbit.el += (orbit.tEl - orbit.el) * Math.min(1, dt * 3.2);
+    orbit.r  += (orbit.tR  - orbit.r)  * Math.min(1, dt * 3.2);
+    if (camera) {
+      camera.position.set(
+        Math.cos(orbit.el) * Math.sin(orbit.az) * orbit.r,
+        Math.sin(orbit.el) * orbit.r + 1.5,
+        Math.cos(orbit.el) * Math.cos(orbit.az) * orbit.r
+      );
+      camera.lookAt(0, 1.2, 0);
+    }
+
+    if (S.trace && S.playing && !S.dragging) {
+      acc += dt * S.stepsPerSec * S.speed;
+      if (acc >= 1) {
+        var adv = Math.floor(acc); acc -= adv;
+        S.frame = (S.frame + adv) % S.trace.episode.n_steps;
+      }
+      render(false);
+    } else if (S.trace && !reduced) {
+      render(false); // keep particles alive while paused
+    }
+    if (renderer) renderer.render(scene, camera);
+  }
+
+  // ------------------------------------------------------------------ input
+  var drag = null;
+  el.scene.addEventListener("pointerdown", function (e) {
+    drag = { x: e.clientX, y: e.clientY, az: orbit.tAz, el: orbit.tEl };
+    el.scene.setPointerCapture(e.pointerId);
+  });
+  el.scene.addEventListener("pointermove", function (e) {
+    if (!drag) return;
+    orbit.tAz = drag.az - (e.clientX - drag.x) * 0.008;
+    orbit.tEl = Math.max(-0.1, Math.min(1.25, drag.el + (e.clientY - drag.y) * 0.006));
+  });
+  el.scene.addEventListener("pointerup", function (e) {
+    drag = null; try { el.scene.releasePointerCapture(e.pointerId); } catch (x) {}
+  });
+  el.scene.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    orbit.tR = Math.max(7, Math.min(24, orbit.tR + Math.sign(e.deltaY) * 0.8));
+  }, { passive: false });
+
+  el.playBtn.addEventListener("click", function () {
+    S.playing = !S.playing;
+    el.playBtn.textContent = S.playing ? "Pause" : "Play";
+    el.playBtn.setAttribute("aria-pressed", String(S.playing));
+  });
+  var SPEEDS = [0.5, 1, 2, 4];
+  el.speedBtn.addEventListener("click", function () {
+    var i = (SPEEDS.indexOf(S.speed) + 1) % SPEEDS.length;
+    S.speed = SPEEDS[i];
+    el.speedBtn.innerHTML = S.speed + "&times;";
+  });
+  el.restartBtn.addEventListener("click", function () { S.frame = 0; render(true); });
+  el.beatHeat.addEventListener("click", function () { setBeat("heat"); });
+  el.beatCool.addEventListener("click", function () { setBeat("cool"); });
+  el.beatBlind.addEventListener("click", function () { setBeat("blind"); });
+  el.traceSel.addEventListener("change", function () { loadTrace(parseInt(el.traceSel.value, 10)); });
+  el.themeBtn.addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    var next = cur === "dark" ? "light" : (cur === "light" ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", next);
+    applySceneTheme();
+    if (S.trace) drawPlots();
+    render(true);
+  });
+  window.addEventListener("resize", resize);
+
+  // ------------------------------------------------------------------ boot
+  initScene();
+  buildPack(8);
+  setBeat("cool");
+  resize();
+  requestAnimationFrame(tick);
+
+  loadManifest().catch(function (err) {
+    el.provenance.textContent = "Could not load traces from traces/ or ../results/traces/ — " +
+      "run scripts/export_trace.py, then serve the repository root over HTTP.";
+    el.chipState.textContent = "no trace loaded";
+    console.error(err);
+  });
+})();
+</script>
