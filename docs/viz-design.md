@@ -274,6 +274,15 @@ Rules:
 - **`config_sha256` is taken over LF-normalised bytes**, not the file as it sits on disk. Hashing
   raw bytes makes the value depend on whether the checkout is CRLF or LF, so the same config would
   hash differently on Windows and on Linux CI — which is precisely where the hash would be trusted.
+  Measured on a Windows checkout of this repository: the working copy hashes to `5af440e6…` and the
+  stored blob to `5a1b9920…`, so this was an actual divergence rather than a theoretical one.
+- **`meta.source_csv` is optional** and is omitted when the run writes no CSV. The exporter writes
+  JSON only, so it does not appear there; it exists for runs that also log a CSV alongside.
+- **A committed trace's `git_commit` does not survive a rebase.** It names the commit the trace was
+  exported on top of, which cannot be the commit containing it, and a rebase orphans it entirely.
+  This is one reason only a single trace is committed as a fixture while the rest are generated:
+  a fixture's pointer is a development convenience, not a provenance guarantee. For traces that
+  back anything published, regenerate rather than commit.
 - **A controller's parameters live in `controller_params`, never in its name.** `controller` is the
   bare family (`constant`, `thermostat`, `pid`, `ppo_lagrangian`) and `controller_params` carries
   the arguments (`{"action": 0.3}`), empty for a controller that takes none. Encoding arguments into
