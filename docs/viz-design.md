@@ -290,12 +290,13 @@ Rules:
 - **`episode.initial` records the reset state**, because `t_s` begins at the end of the first
   control step and the series must all stay `n_steps` long. Without it the opening beat would start
   one step after the pack was at rest.
-- **`series.sensors` is reconstructed, not logged.** The environment does not record sensor
-  readings; they exist only inside the observation vector in scaled form. The exporter inverts that
-  scaling, which recovers exactly what the controller saw, with a round-trip error of order 1e-5 K
-  from float32 observations. Under `full` the environment adds no noise, so these equal the truth at
-  the sensed cells. If the environment later logs the readings directly, this block becomes a copy
-  and the caveat disappears.
+- **`series.sensors` is copied from the environment's own log.** `battery_pack.py` records the
+  readings it handed the controller as `sensor_T_cells`, `sensor_T_in` and `sensor_T_out`, so the
+  exporter copies them like every other series rather than reconstructing them. They are the same
+  noise sample the controller acted on and not a second draw: adding the keys introduced no new
+  call to the environment's random generator, and a fixed rollout hashes bit-identically before and
+  after the change, with rewards equal to the last digit. Under `full` the environment adds no
+  noise, so these values equal the truth at the sensed cells exactly.
 - A `traces/manifest.json` indexes available traces by controller, observation mode, seed and
   profile, so lab mode's selector is generated rather than hardcoded.
 - The schema version bumps on any breaking change, and the loader refuses an unknown major version
