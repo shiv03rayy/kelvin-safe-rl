@@ -3,9 +3,15 @@
 Rolls every grid point in :mod:`kelvin_rl.control.tuning` over the fixed set of
 training profiles, writes one row per (controller, obs_mode, grid point,
 profile) to ``results/m2_tuning_sweep.csv``, then reads that file back and
-applies the selection rule to it. The printed block is the content of
-``TUNED`` in ``kelvin_rl.control.baselines``; nothing is chosen by eye, and the
-held-out test split is never touched here.
+applies the selection rules to it. The printed block is the content of ``TUNED``
+in ``kelvin_rl.control.baselines``; nothing is chosen by eye, and the held-out
+test split is never touched here.
+
+``thermostat`` and ``thermostat_margin`` are the same controller judged by two
+rules, so they share one set of simulated episodes - only the controllers in
+``SWEEP_CONTROLLERS`` are rolled out. The shortlists printed at the end show
+how many candidates each rule had to choose from, including whether the
+margin rule had any viable candidate at all.
 
 Run with::
 
@@ -31,13 +37,16 @@ from kelvin_rl.config import REPO_ROOT
 from kelvin_rl.control import baselines
 from kelvin_rl.control.tuning import (
     GRIDS,
+    SWEEP_CONTROLLERS,
     TUNED_OBS_MODES,
     TUNING_PROFILES,
     TUNING_SPLIT,
+    aggregate,
     build_params,
     candidates,
+    rank,
     select_best,
-    select_best_from_csv,
+    selection_rules,
 )
 from kelvin_rl.envs import BatteryPackCoolingEnv
 from kelvin_rl.eval.metrics import episode_metrics, run_episode
@@ -91,8 +100,8 @@ def sweep(obs_modes, profiles, jobs: int = 1) -> pd.DataFrame:
     tasks = [
         (obs_mode, name, values, tuple(profiles))
         for obs_mode in obs_modes
-        for name in baselines.BASELINES
-        for values in candidates(name)
+        for name in SWEEP_CONTROLLERS  # a controller that differs only in its
+        for values in candidates(name)  # selection rule needs no extra episodes
     ]
     t0 = time.perf_counter()
     rows: list[dict] = []
@@ -154,9 +163,11 @@ def main() -> int:
     csv_path = results_dir / CSV_NAME
 
     if args.check:
-        selected = select_best_from_csv(csv_path)
+        logged = pd.read_csv(csv_path)
+        selected = select_best(logged)
         print(f"selection re-derived from {csv_path.relative_to(REPO_ROOT)}:")
         print(format_selection(selected))
+        print(report_candidates(logged))
         mismatched = {k: v for k, v in selected.items() if baselines.TUNED.get(k) != v}
         if mismatched:
             print("\nMISMATCH against baselines.TUNED:")
@@ -178,25 +189,39 @@ def main() -> int:
 
     selected = select_best(df)
     print(f"\nwrote {csv_path.relative_to(REPO_ROOT)} ({len(df)} episodes)")
-    print("\nselected by the rule in kelvin_rl.control.tuning.select_best:")
+    print("\nselected by the rules in kelvin_rl.control.tuning.selection_rules:")
     print(format_selection(selected))
-
-    print("\nper-candidate winners, aggregated over the tuning profiles:")
-    for (name, obs_mode), params in sorted(selected.items()):
-        keys = list(GRIDS[name])
-        sub = df[(df.controller == name) & (df.obs_mode == obs_mode)]
-        agg = sub.groupby(keys).agg(
-            degree_s_above=("degree_s_above", "sum"),
-            pump_energy_kJ=("pump_energy_kJ", "mean"),
-            worst_peak_T_C=("peak_T_C", "max"),
-        )
-        safe = agg[agg.degree_s_above == 0.0]
-        print(
-            f"  {name}/{obs_mode}: {len(agg)} candidates, "
-            f"{len(safe)} with zero degree-seconds above T_max on all tuning profiles"
-        )
-        print(agg.sort_values(["degree_s_above", "pump_energy_kJ"]).head(5).round(3).to_string())
+    print(report_candidates(df))
     return 0
+
+
+def report_candidates(df: pd.DataFrame) -> str:
+    """Per-rule shortlists, so the choice can be seen rather than taken on trust."""
+    lines = ["\nshortlists, aggregated over the tuning profiles:"]
+    for rule in selection_rules():
+        if not GRIDS[rule.controller]:
+            continue
+        for obs_mode in sorted(set(df.loc[df["controller"] == rule.sweep_controller, "obs_mode"])):
+            agg = aggregate(df, rule, obs_mode)
+            safe = agg[agg["degree_s_above"] == 0.0]
+            limit = rule.max_worst_peak_C
+            constraint = (
+                "no constraint on the worst peak"
+                if limit is None
+                else f"worst tuning peak required at or below {limit:.2f} C: "
+                f"{int((safe['worst_peak_T_C'] <= limit).sum())} of {len(safe)} qualify"
+            )
+            lines.append(
+                f"  {rule.controller}/{obs_mode}: {len(agg)} candidates, {len(safe)} with zero "
+                f"degree-seconds above T_max on all tuning profiles; {constraint}"
+            )
+            try:
+                shortlist = rank(agg, rule).head(5)
+            except ValueError as exc:  # the rule rules everything out: say so
+                lines.append(f"    NO VIABLE CANDIDATE: {exc}")
+                continue
+            lines.append(shortlist.round(3).to_string(index=False))
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

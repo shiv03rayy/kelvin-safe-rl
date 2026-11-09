@@ -21,11 +21,12 @@ from kelvin_rl.control.baselines import (
     ThermostatParams,
     make_controller,
 )
-from kelvin_rl.control.tuning import select_best_from_csv
+from kelvin_rl.control.tuning import margin_limit_C, select_best_from_csv
 from kelvin_rl.eval.metrics import episode_metrics, run_episode
 
 MODES = ["full", "partial", "partial_history"]
 TUNING_CSV = REPO_ROOT / "results" / "m2_tuning_sweep.csv"
+EVALUATION_CSV = REPO_ROOT / "results" / "m2_baselines_test.csv"
 
 
 def synthetic_obs(env, temps, *, T_in=30.0, T_out=35.0, current=0.0, prev_action=0.5, t=0.0):
@@ -265,3 +266,55 @@ def test_tuning_used_training_profiles_only():
     assert TUNING_SPLIT == "train"
     assert set(df["split"]) == {"train"}
     assert set(df["profile"]) <= set(TUNING_PROFILES)
+
+
+@pytest.mark.skipif(not EVALUATION_CSV.exists(), reason="run scripts/evaluate_baselines.py first")
+def test_evaluation_used_held_out_profiles_only(make_env):
+    """The evaluation log must carry its own evidence that it is held out."""
+    import pandas as pd
+
+    env = make_env(split="test")
+    df = pd.read_csv(EVALUATION_CSV)
+    assert set(df["split"]) == {"test"}
+    assert set(df["profile"]) == set(range(env.profiles.count("test")))
+    assert df["seed"].nunique() >= 5  # the README asks for at least five seeds
+    assert set(df["controller"]) == set(BASELINES)
+
+
+@pytest.mark.skipif(not TUNING_CSV.exists(), reason="run scripts/tune_baselines.py first")
+@pytest.mark.parametrize("mode", ["full", "partial"])
+def test_margin_rule_is_satisfied_by_what_it_selected(mode):
+    """thermostat_margin's defining constraint, checked against the logged sweep.
+
+    The limit is derived from the configured sensor noise, so this also pins the
+    derivation rather than a number.
+    """
+    import pandas as pd
+
+    from kelvin_rl.config import load_config
+    from kelvin_rl.control.tuning import MARGIN_SIGMAS
+
+    cfg = load_config()
+    limit = margin_limit_C(cfg)
+    assert limit == cfg["safety"]["T_max"] - MARGIN_SIGMAS * cfg["sensors"]["sigma_cell"]
+
+    params = baselines.TUNED[("thermostat_margin", mode)]
+    df = pd.read_csv(TUNING_CSV)
+    rows = df[
+        (df["controller"] == "thermostat")
+        & (df["obs_mode"] == mode)
+        & (df["on_margin_K"] == params.on_margin_K)
+        & (df["band_K"] == params.band_K)
+    ]
+    assert len(rows) == len(set(rows["profile"])) > 0
+    assert rows["peak_T_C"].max() <= limit
+    assert rows["degree_s_above"].sum() == 0.0
+
+
+def test_both_thermostat_variants_exist_and_are_the_same_controller(make_env):
+    """One controller, two selection rules: the failure and the fix stay comparable."""
+    env = make_env()
+    plain = make_controller("thermostat", env)
+    margin = make_controller("thermostat_margin", env)
+    assert type(plain) is type(margin) is ThermostatController
+    assert plain.params != margin.params

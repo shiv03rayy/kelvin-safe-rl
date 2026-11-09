@@ -1,10 +1,17 @@
 """M2 evaluation: every classical baseline on the HELD-OUT test profiles.
 
-Runs constant maximum flow, the thermostat and the PID over every test profile
-for several seeds, in each observation mode, and writes one row per
-(controller, obs_mode, profile, seed) to ``results/m2_baselines_test.csv``. The
-summary printed at the end is computed from that file after reading it back, so
-the table and the CSV cannot drift apart.
+Runs every baseline in ``kelvin_rl.control.baselines.BASELINES`` over every test
+profile for several seeds, in each observation mode, and writes one row per
+(controller, obs_mode, profile, seed) to ``results/m2_baselines_test.csv``. Each
+row records its ``split``, so the file is self-evidently an evaluation on
+held-out profiles. The summary printed at the end is computed from that file
+after reading it back, so the table and the CSV cannot drift apart.
+
+Both thermostat variants are evaluated: ``thermostat``, whose parameters come
+from the pre-registered selection rule, and ``thermostat_margin``, whose rule
+demands a safety margin on the tuning profiles and was written after the first
+variant was seen to fail here. Keeping both means the failure and the fix are
+measured the same way.
 
 Controller parameters come from ``kelvin_rl.control.baselines.TUNED``, which was
 selected on training profiles by ``scripts/tune_baselines.py``. Nothing is
@@ -60,6 +67,9 @@ def evaluate(obs_modes, seeds, controllers) -> pd.DataFrame:
                         {
                             "controller": name,
                             "obs_mode": obs_mode,
+                            # Logged on every row so the file carries its own
+                            # evidence that these are held-out profiles.
+                            "split": SPLIT,
                             "profile": profile,
                             "seed": seed,
                             "fast_charge": env.profiles.get(SPLIT, profile).has_fast_charge,

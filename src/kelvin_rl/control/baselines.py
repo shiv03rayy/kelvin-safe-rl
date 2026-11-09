@@ -1,4 +1,4 @@
-"""Classical baseline controllers: constant maximum flow, thermostat, PID.
+"""Classical baseline controllers: constant maximum flow, thermostat(s), PID.
 
 These are the reference points the RL agents have to beat (M3). Each one is a
 small stateful callable with the same interface, so the evaluation script can
@@ -40,12 +40,15 @@ live in :mod:`kelvin_rl.control.tuning`):
    (episode seed = profile index). The held-out test split is never read by the
    sweep.
 3. Every episode's metrics are logged to ``results/m2_tuning_sweep.csv``.
-4. The winner is chosen from that file by one lexicographic rule
+4. The winner is chosen from that file by a lexicographic rule
    (:func:`~kelvin_rl.control.tuning.select_best`): least total degree-seconds
    above ``T_max`` summed over the tuning profiles, then least mean pump
    energy, then the parameter values themselves for determinism. Safety first,
    energy second; if no candidate is safe on every tuning profile the rule
    still returns the least-unsafe one rather than silently hiding the failure.
+   That is the whole rule for every controller except ``thermostat_margin``,
+   which adds one constraint - see the section below, and read that section
+   before quoting any of this as pre-registered.
 5. The winner per (controller, obs_mode) is the default in :data:`TUNED`.
    ``tests/test_baselines.py::test_tuned_defaults_match_logged_sweep`` re-runs
    step 4 against the committed CSV, so a default that did not come out of the
@@ -56,6 +59,30 @@ temperature" means something different when it is one of eight true cell
 temperatures and when it is the warmer of two noisy upstream sensors.
 ``partial_history`` reuses the ``partial`` tuning: the sensors are the same and
 these controllers only ever use the newest frame.
+
+The two thermostats, and where the second rule came from
+--------------------------------------------------------
+``thermostat`` and ``thermostat_margin`` are the *same* controller on the same
+grid, selected by two different rules from the same logged sweep.
+
+``thermostat`` uses the rule above, which was fixed before any evaluation. On
+the held-out profiles that thermostat exceeded ``T_max`` in some episodes, which
+``results/m2_baselines_test.csv`` records. The cause is visible in the tuning
+log: because the rule asks only for zero violations *on the tuning profiles* and
+otherwise minimises energy, it selects the most aggressive candidate that just
+survives training, leaving no margin for a profile it has not seen.
+
+``thermostat_margin`` was added **after** that was observed, so - unlike every
+other number in this module - its selection rule is **not pre-registered**, and
+it should be read as a post-hoc design fix rather than as a prediction that was
+confirmed. What it adds is one feasibility constraint, documented in
+:mod:`kelvin_rl.control.tuning`: the worst peak over the tuning profiles must
+also sit at or below ``T_max - 2 * sigma_cell``, computed from the configured
+sensor noise instead of being written down as a number. It still never looks at
+the test split, and it is still the same lexicographic rule inside the feasible
+set, so nothing is hand-picked; but it was motivated by a held-out failure, and
+that is a weaker claim than the rest of this module makes. Both variants are
+kept and both are evaluated, so the failure stays on the record next to the fix.
 """
 
 from __future__ import annotations
@@ -64,7 +91,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-BASELINES = ("constant_max", "thermostat", "pid")
+BASELINES = ("constant_max", "thermostat", "thermostat_margin", "pid")
 
 # Modes that share a tuning: partial_history sees the same sensors as partial.
 TUNING_OBS_MODE = {"full": "full", "partial": "partial", "partial_history": "partial"}
@@ -264,8 +291,9 @@ class PIDController(BaselineController):
 
 
 # Tuned defaults. Every number below was selected by scripts/tune_baselines.py
-# from results/m2_tuning_sweep.csv under the rule documented in this module's
-# docstring; it is not hand-picked and should not be edited by hand.
+# from results/m2_tuning_sweep.csv under the rules documented in this module's
+# docstring - including, for thermostat_margin, the post-hoc one; none of them
+# is hand-picked and none should be edited by hand.
 # tests/test_baselines.py::test_tuned_defaults_match_logged_sweep re-derives
 # them from the committed CSV and fails on any drift.
 TUNED: dict[tuple[str, str], ThermostatParams | PIDParams] = {
@@ -273,9 +301,15 @@ TUNED: dict[tuple[str, str], ThermostatParams | PIDParams] = {
     ("pid", "partial"): PIDParams(setpoint_margin_K=5.0, Kp=0.2, Ki=0.0, Kd=0.0),
     ("thermostat", "full"): ThermostatParams(on_margin_K=1.0, band_K=0.5),
     ("thermostat", "partial"): ThermostatParams(on_margin_K=2.0, band_K=0.5),
+    ("thermostat_margin", "full"): ThermostatParams(on_margin_K=2.0, band_K=0.5),
+    ("thermostat_margin", "partial"): ThermostatParams(on_margin_K=4.0, band_K=0.5),
 }
 
-_CLASSES = {"thermostat": ThermostatController, "pid": PIDController}
+_CLASSES = {
+    "thermostat": ThermostatController,
+    "thermostat_margin": ThermostatController,  # same controller, stricter selection rule
+    "pid": PIDController,
+}
 
 
 def tuned_params(name: str, obs_mode: str) -> ThermostatParams | PIDParams:
