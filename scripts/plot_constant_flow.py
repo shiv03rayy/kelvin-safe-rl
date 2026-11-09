@@ -58,7 +58,14 @@ def sweep(env) -> pd.DataFrame:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--example-action", type=float, default=0.3)
+    ap.add_argument(
+        "--example-action",
+        type=float,
+        default=0.1,
+        help="Constant action drawn in the middle panel. The default sits low enough that "
+        "cells cross T_max, so the sanity figure shows the failure mode rather than "
+        "approaching it.",
+    )
     args = ap.parse_args()
 
     env = BatteryPackCoolingEnv(split="test")
