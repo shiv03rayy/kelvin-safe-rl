@@ -1,0 +1,228 @@
+# Default configuration for BatteryPackCoolingEnv.
+#
+# Every physical parameter is a mapping with `value`, `unit` and `source`.
+# `source: illustrative` means the value is a plausible order of magnitude chosen
+# for this toy model, not a measured or cited figure. Values marked
+# `source: to-verify` are commonly quoted figures that still need a citation.
+# tests/test_config.py fails if any parameter is missing a source.
+
+pack:
+  n_cells:
+    value: 8
+    unit: "-"
+    source: illustrative
+    note: "Cells in series along one coolant channel."
+  C_cell:
+    value: 900.0
+    unit: J/K
+    source: illustrative
+    note: "Heat capacity of one cell: about 0.9 kg x 1000 J/(kg K), the order of a ~50 Ah prismatic cell."
+  capacity_Ah:
+    value: 50.0
+    unit: Ah
+    source: illustrative
+    note: "Used only to express load profiles as C-rates (1C = 50 A)."
+  R_nominal:
+    value: 2.0e-3
+    unit: ohm
+    source: illustrative
+    note: "Internal resistance of one cell; order of a few milliohm for large-format Li-ion. Set so that fast charging needs substantial cooling (see figures/m1_constant_flow.png)."
+  k_cond:
+    value: 0.5
+    unit: W/K
+    source: illustrative
+    note: "Cell-to-cell conductance through tabs, busbars and housing."
+  h_amb:
+    value: 5.0
+    unit: W/(m^2 K)
+    source: illustrative
+    note: "Weak natural convection to the surroundings."
+  A_amb:
+    value: 0.02
+    unit: m^2
+    source: illustrative
+    note: "Area of one cell exposed to ambient air."
+  T_amb:
+    value: 30.0
+    unit: degC
+    source: illustrative
+
+coolant:
+  cp:
+    value: 3500.0
+    unit: J/(kg K)
+    source: illustrative
+    note: "Roughly a 50/50 water-glycol mixture."
+  h0:
+    value: 300.0
+    unit: W/(m^2 K)
+    source: illustrative
+    note: "Effective cell-to-coolant heat transfer coefficient at the reference flow rate."
+  A:
+    value: 0.01
+    unit: m^2
+    source: illustrative
+    note: "Contact area between one cell and the cold plate."
+  mdot_ref:
+    value: 0.02
+    unit: kg/s
+    source: illustrative
+    note: "Reference flow rate at which h_eff = h0."
+  flow_exponent:
+    value: 0.8
+    unit: "-"
+    source: "Dittus-Boelter correlation, Nu ~ Re^0.8 (turbulent pipe flow); used here as an approximate scaling only."
+  mdot_min:
+    value: 0.002
+    unit: kg/s
+    source: illustrative
+  mdot_max:
+    value: 0.05
+    unit: kg/s
+    source: illustrative
+  T_in:
+    value: 30.0
+    unit: degC
+    source: illustrative
+    note: "Fixed coolant inlet temperature. 30 C represents a hot day with radiator-only cooling (no chiller), which leaves a 15 K margin to T_max."
+  P_pump_max:
+    value: 40.0
+    unit: W
+    source: illustrative
+    note: "Pump power at mdot_max. P = P_pump_max * (mdot / mdot_max)^3, from the pump affinity laws."
+  rate_limit_frac:
+    value: 0.2
+    unit: "fraction of [mdot_min, mdot_max] per control step"
+    source: illustrative
+    note: "Actuator rate limit: the flow may change by at most this fraction of its range per control step."
+
+time:
+  dt_phys:
+    value: 1.0
+    unit: s
+    source: illustrative
+    note: "Explicit Euler physics sub-step. Checked for stability at construction."
+  dt_ctrl:
+    value: 10.0
+    unit: s
+    source: illustrative
+    note: "Control interval. Must be a whole multiple of dt_phys."
+  episode_s:
+    value: 3600.0
+    unit: s
+    source: illustrative
+    note: "Length of one load profile (one episode)."
+
+safety:
+  T_max:
+    value: 45.0
+    unit: degC
+    source: to-verify
+    note: "Commonly quoted upper operating limit for Li-ion cells. Needs a citation."
+  dT_max:
+    value: 5.0
+    unit: K
+    source: to-verify
+    note: "Commonly quoted limit on cell-to-cell temperature spread. Logged; optional constraint."
+
+init:
+  T_init:
+    value: 30.0
+    unit: degC
+    source: illustrative
+  T_init_jitter:
+    value: 1.0
+    unit: K
+    source: illustrative
+    note: "Initial cell temperatures are T_init + U(0, jitter), sampled per episode."
+  action_init:
+    value: 0.5
+    unit: "normalised action"
+    source: illustrative
+    note: "Flow setting before the first control step."
+
+sensors:
+  cell_indices:
+    value: [0, 3]
+    unit: "0-based cell index"
+    source: illustrative
+    note: "Sensed cells in partial modes: cell 1 (inlet end) and cell N/2. The hottest cell is usually unsensed."
+  sigma_cell:
+    value: 0.5
+    unit: K
+    source: illustrative
+    note: "Gaussian noise on cell temperature sensors."
+  sigma_coolant:
+    value: 0.2
+    unit: K
+    source: illustrative
+    note: "Gaussian noise on coolant inlet and outlet sensors."
+  history_len:
+    value: 4
+    unit: "control steps"
+    source: illustrative
+    note: "Frame-stack length for the partial_history mode."
+
+mismatch:
+  scale:
+    value: 1.0
+    unit: "-"
+    source: illustrative
+    note: "Multiplies every relative perturbation below. 0 means the environment uses the nominal model exactly."
+  h0_rel:
+    value: 0.2
+    unit: "relative"
+    source: illustrative
+    note: "True h0 = nominal * (1 + U(-1, 1) * h0_rel * scale)."
+  C_cell_rel:
+    value: 0.1
+    unit: "relative"
+    source: illustrative
+    note: "True C_cell = nominal * (1 + U(-1, 1) * C_cell_rel * scale), one factor for the whole pack."
+  R_spread_rel:
+    value: 0.05
+    unit: "relative std"
+    source: illustrative
+    note: "Per-cell manufacturing spread: true R_i = R_nominal * (1 + N(0, 1) * R_spread_rel * scale)."
+  seed:
+    value: 12345
+    unit: "-"
+    source: illustrative
+    note: "Fixes the true plant, so every training seed faces the same plant."
+
+profiles:
+  seed:
+    value: 2026
+    unit: "-"
+    source: illustrative
+    note: "Base seed for generating load profiles."
+  n_train:
+    value: 200
+    unit: profiles
+    source: illustrative
+  n_test:
+    value: 20
+    unit: profiles
+    source: illustrative
+    note: "Held-out profiles. Generated from a separate random stream; never used for training or tuning."
+  fast_charge_prob:
+    value: 0.5
+    unit: "-"
+    source: illustrative
+    note: "Probability that a profile contains a fast-charge segment."
+
+observation:
+  T_ref:
+    value: 25.0
+    unit: degC
+    source: illustrative
+    note: "Temperatures are observed as (T - T_ref) / T_scale."
+  T_scale:
+    value: 20.0
+    unit: K
+    source: illustrative
+  I_scale:
+    value: 150.0
+    unit: A
+    source: illustrative
+    note: "Current is observed as I / I_scale (3C = 1.0)."

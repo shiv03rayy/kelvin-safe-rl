@@ -2,7 +2,7 @@
 
 **Safe reinforcement learning with Kalman state estimation for battery thermal management**
 
-> **Status: early development.** Nothing below is implemented yet. This README describes the design and the planned experiments. It has no results section yet: results will only appear here once a script has generated them from logged data in `results/`. See the [roadmap](#roadmap) for progress.
+> **Status: early development.** The simulated environment and its physics tests exist; the controllers, the Kalman filter and the RL agents do not yet. This README describes the design and the planned experiments. It has no results section yet: results will only appear here once a script has generated them from logged data in `results/`. See the [roadmap](#roadmap) for progress.
 
 Kelvin is an open-source research prototype for **safety-constrained control under partial observability**. A reinforcement learning agent controls the coolant flow through a simulated battery pack. It has to keep every cell below a temperature limit while using as little pumping energy as possible. Only a few cells have sensors, and those sensors are noisy, so a Kalman filter built from the pack's physics model estimates the hidden cell temperatures, and the controller acts on those estimates.
 
@@ -223,8 +223,8 @@ python scripts/make_figures.py
 
 ## Roadmap
 
-- [ ] **M0:** Repository scaffold, pinned dependencies, config system, CI running `pytest`
-- [ ] **M1:** Physics, environment and load profiles, with sanity tests for energy balance, equilibrium, monotonicity, the spatial gradient, the Gymnasium API and the rate limit
+- [x] **M0:** Repository scaffold, pinned dependencies, config system, CI running `pytest`
+- [ ] **M1 (built, parameters under review):** Physics, environment and load profiles, with sanity tests for energy balance, equilibrium, monotonicity, the spatial gradient, the Gymnasium API and the rate limit. Sanity figure: `python scripts/plot_constant_flow.py`
 - [ ] **M2:** Classical baselines evaluated on held-out profiles
 - [ ] **M3:** PPO-penalty and PPO-Lagrangian on `full` observations, at least 5 seeds (E1, E2)
 - [ ] **M4:** Partial observability and the Kalman filter (E3, E4)
