@@ -1,0 +1,19 @@
+{
+ "schema": "kelvin.trace.manifest/1",
+ "generated_utc": "2026-11-09T16:16:43Z",
+ "traces": [
+  {
+   "file": "constant_a0.30_partial_seed0_test07.json",
+   "controller": "constant_a0.30",
+   "obs_mode": "partial",
+   "seed": 0,
+   "split": "test",
+   "profile_index": 7,
+   "mismatch_scale": 1.0,
+   "n_steps": 360,
+   "git_commit": "fd4fedc",
+   "config_sha256": "5af440e623a6ef8f103e5465da07c94eb9fd09c77452598e62ca6e6c5fd47a28",
+   "exported_utc": "2026-11-09T16:16:43Z"
+  }
+ ]
+}
