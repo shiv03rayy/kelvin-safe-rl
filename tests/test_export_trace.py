@@ -32,7 +32,11 @@ ENV_KEYS = {
     "n_cells", "T_max_C", "dT_max_K", "mdot_min", "mdot_max", "delta_mdot_max",
     "T_in_C", "T_amb_C", "P_pump_max_W", "dt_ctrl_s", "dt_phys_s", "sensor_cells",
 }
-RUN_KEYS = {"controller", "obs_mode", "seed", "split", "profile_index", "mismatch_scale"}
+RUN_KEYS = {
+    "controller", "controller_params", "obs_mode",
+    "seed", "split", "profile_index", "mismatch_scale",
+}
+INITIAL_KEYS = {"t_s", "T_cells_C", "mdot"}
 SUMMARY_KEYS = {
     "pump_energy_kJ", "peak_T_C", "pct_steps_violating",
     "degree_s_above", "max_spread_K", "return", "cost_total",
@@ -79,7 +83,8 @@ def test_top_level_keys_and_nesting(exported):
     assert set(trace["meta"]) == META_KEYS
     assert set(trace["meta"]["env"]) == ENV_KEYS
     assert set(trace["meta"]["run"]) == RUN_KEYS
-    assert set(trace["episode"]) == {"n_steps", "summary"}
+    assert set(trace["episode"]) == {"n_steps", "initial", "summary"}
+    assert set(trace["episode"]["initial"]) == INITIAL_KEYS
     assert set(trace["episode"]["summary"]) == SUMMARY_KEYS
     assert set(trace["series"]) - OPTIONAL_SERIES == REQUIRED_SERIES
     assert set(trace["series"]["energy_J"]) == ENERGY_KEYS
@@ -105,7 +110,8 @@ def test_meta_env_matches_the_environment(exported):
 def test_meta_run_records_the_request(exported):
     _, trace = exported
     assert trace["meta"]["run"] == {
-        "controller": f"constant_a{ACTION:.2f}",
+        "controller": "constant",
+        "controller_params": {"action": ACTION},
         "obs_mode": "partial",
         "seed": SEED,
         "split": "test",
@@ -122,9 +128,30 @@ def test_commit_and_config_hash_are_present_and_true(exported):
         cwd=export_trace.REPO_ROOT, check=True, capture_output=True, text=True,
     ).stdout.strip()
     assert trace["meta"]["git_commit"] == head != ""
-    expected = hashlib.sha256(export_trace.DEFAULT_CONFIG.read_bytes()).hexdigest()
-    assert trace["meta"]["config_sha256"] == expected
+    raw = export_trace.DEFAULT_CONFIG.read_bytes().replace(b"\r\n", b"\n")
+    assert trace["meta"]["config_sha256"] == hashlib.sha256(raw).hexdigest()
     assert trace["meta"]["exported_utc"].endswith("Z")
+
+
+def test_config_hash_does_not_depend_on_line_endings(tmp_path):
+    """The hash must identify the config, not the checkout it was cloned on.
+
+    git hands a Windows working tree CRLF and Linux CI LF for the same
+    committed file, and this field is compared across exactly those two.
+    """
+    lf = export_trace.DEFAULT_CONFIG.read_bytes().replace(b"\r\n", b"\n")
+    (tmp_path / "lf.yaml").write_bytes(lf)
+    (tmp_path / "crlf.yaml").write_bytes(lf.replace(b"\n", b"\r\n"))
+    assert (tmp_path / "crlf.yaml").read_bytes() != (tmp_path / "lf.yaml").read_bytes()
+    assert export_trace.config_sha256(tmp_path / "crlf.yaml") == export_trace.config_sha256(
+        tmp_path / "lf.yaml"
+    )
+
+    # ...and still changes when the config itself changes.
+    (tmp_path / "other.yaml").write_bytes(lf + b"\n# a comment\n")
+    assert export_trace.config_sha256(tmp_path / "other.yaml") != export_trace.config_sha256(
+        tmp_path / "lf.yaml"
+    )
 
 
 # --------------------------------------------------------------------- shapes
@@ -149,6 +176,24 @@ def test_per_cell_arrays_are_pack_width(exported):
     for key in ("T_cells_C", "T_coolant_C"):
         assert {len(row) for row in series[key]} == {n_cells}, key
     assert {len(row) for row in series["sensors"]["cells_C"]} == {n_sensors}
+
+
+def test_initial_block_is_the_reset_state(exported):
+    """t = 0 is not in the series, so it has to be recorded separately."""
+    _, trace = exported
+    env = BatteryPackCoolingEnv(obs_mode="partial", split="test")
+    _, reset_info = env.reset(
+        seed=SEED, options={"profile_index": PROFILE, "action_init": ACTION}
+    )
+    initial = trace["episode"]["initial"]
+    assert initial["t_s"] == 0.0
+    assert len(initial["T_cells_C"]) == trace["meta"]["env"]["n_cells"]
+    np.testing.assert_allclose(initial["T_cells_C"], reset_info["T_cells"])
+    assert initial["mdot"] == pytest.approx(env.action_to_mdot(ACTION))
+    assert initial["mdot"] == pytest.approx(reset_info["mdot"])
+    # It precedes the series rather than duplicating their first entry.
+    assert trace["series"]["t_s"][0] > initial["t_s"]
+    assert initial["T_cells_C"] != trace["series"]["T_cells_C"][0]
 
 
 def test_time_axis_is_the_control_grid(exported):
@@ -215,6 +260,8 @@ def test_lambda_series_appears_only_for_a_controller_that_has_one(tmp_path):
     n = trace["episode"]["n_steps"]
     assert trace["series"]["lambda"] == [float(k + 1) for k in range(n)]
     assert "estimate" not in trace["series"]
+    # A controller with no parameters reports an empty dict, not a missing key.
+    assert trace["meta"]["run"]["controller_params"] == {}
 
     plain = export_trace.ConstantAction(ACTION)
     rec_plain = export_trace.rollout(env, plain, seed=SEED, profile_index=PROFILE)
@@ -338,6 +385,7 @@ def test_manifest_round_trips(tmp_path):
     for entry, trace in zip(manifest["traces"], (trace_a, trace_b)):
         run = trace["meta"]["run"]
         assert entry["controller"] == run["controller"]
+        assert entry["controller_params"] == run["controller_params"]
         assert entry["obs_mode"] == run["obs_mode"]
         assert entry["seed"] == run["seed"]
         assert entry["split"] == run["split"]
@@ -345,7 +393,9 @@ def test_manifest_round_trips(tmp_path):
         assert entry["n_steps"] == trace["episode"]["n_steps"]
         assert entry["git_commit"] == trace["meta"]["git_commit"]
         assert entry["config_sha256"] == trace["meta"]["config_sha256"]
-    assert {e["controller"] for e in manifest["traces"]} == {"constant_a0.30", "constant_a0.90"}
+    # Two runs of the same controller, told apart by their parameters.
+    assert {e["controller"] for e in manifest["traces"]} == {"constant"}
+    assert [e["controller_params"]["action"] for e in manifest["traces"]] == [ACTION, 0.9]
     assert all((tmp_path / e["file"]).exists() for e in manifest["traces"])
 
 
@@ -369,9 +419,13 @@ def test_manifest_ignores_foreign_json(tmp_path):
     assert [e["file"] for e in manifest["traces"]] == ["a.json"]
 
 
-def test_default_trace_name_follows_the_run(exported):
+def test_default_trace_name_carries_the_controller_parameters(exported):
+    """Two actions must not land on the same default file name."""
     _, trace = exported
-    assert export_trace.trace_name(trace) == f"constant_a{ACTION:.2f}_partial_seed0_test{PROFILE:02d}"
+    assert export_trace.trace_name(trace) == f"constant_action0.3_partial_seed0_test{PROFILE:02d}"
+    other = json.loads(json.dumps(trace))
+    other["meta"]["run"]["controller_params"] = {"action": 0.9}
+    assert export_trace.trace_name(other) != export_trace.trace_name(trace)
 
 
 def test_unknown_controller_is_rejected():

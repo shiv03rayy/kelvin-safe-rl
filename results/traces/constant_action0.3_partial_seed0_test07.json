@@ -1,9 +1,9 @@
 {
  "schema": "kelvin.trace/1",
  "meta": {
-  "git_commit": "fd4fedc",
-  "config_sha256": "5af440e623a6ef8f103e5465da07c94eb9fd09c77452598e62ca6e6c5fd47a28",
-  "exported_utc": "2026-11-09T16:16:43Z",
+  "git_commit": "84642e6",
+  "config_sha256": "5a1b99206c16c3413ab4a3cbf74872acc4365df605d8ea81189ab3576847cfc3",
+  "exported_utc": "2026-11-09T16:23:59Z",
   "env": {
    "n_cells": 8,
    "T_max_C": 45.0,
@@ -22,7 +22,10 @@
    ]
   },
   "run": {
-   "controller": "constant_a0.30",
+   "controller": "constant",
+   "controller_params": {
+    "action": 0.3
+   },
    "obs_mode": "partial",
    "seed": 0,
    "split": "test",
@@ -32,6 +35,20 @@
  },
  "episode": {
   "n_steps": 360,
+  "initial": {
+   "t_s": 0.0,
+   "T_cells_C": [
+    30.636961687321453,
+    30.26978671376387,
+    30.040973523936195,
+    30.01652763552853,
+    30.81327023920027,
+    30.91275557727772,
+    30.60663577576718,
+    30.729496560984
+   ],
+   "mdot": 0.016399999999999998
+  },
   "summary": {
    "pump_energy_kJ": 5.081408019878925,
    "peak_T_C": 35.14263203284095,

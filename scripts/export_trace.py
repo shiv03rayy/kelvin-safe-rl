@@ -14,6 +14,11 @@ resampled. Blocks whose data does not exist (``series.estimate`` without a
 Kalman filter, ``series.lambda`` without a Lagrange multiplier) are **absent,
 not null-filled**, so the viewer's layer has nothing to draw and hides itself.
 
+``meta.config_sha256`` is taken over the config file's bytes with CRLF newlines
+normalised to LF, so the same config hashes identically on a Windows checkout
+and on Linux CI. Without that, the one field whose job is to prove which config
+produced a trace would disagree across the platforms it has to be compared on.
+
 Traces are written uncompressed. Gzip is the viewer's shipping format, but
 compressing here would make the files opaque to ``jq``, to diffing and to the
 tests; compression belongs to the deploy step that copies ``results/traces``
@@ -77,9 +82,11 @@ ESTIMATE_FIELDS = {"mean_C": "estimate_mean_C", "var_K2": "estimate_var_K2"}
 class Controller(Protocol):
     """A controller is a named callable from observation to action.
 
-    ``name`` identifies the run in ``meta.run.controller``, in the trace
-    filename and in the manifest, so it carries any parameterisation with it.
-    Two optional attributes are honoured if present and ignored if absent:
+    ``name`` is the kind of controller (``meta.run.controller``) and ``params``
+    is whatever it was tuned to (``meta.run.controller_params``), empty for a
+    controller that takes no parameters. They are kept apart so the viewer
+    never has to parse a name to recover a number. Two optional attributes are
+    honoured if present and ignored if absent:
 
     * ``initial_action`` -- the flow setting before the first control step.
     * ``lambda_value()`` -- the current Lagrange multiplier. A controller that
@@ -87,6 +94,7 @@ class Controller(Protocol):
     """
 
     name: str
+    params: dict
 
     def __call__(self, obs: np.ndarray) -> np.ndarray: ...
 
@@ -100,10 +108,11 @@ class ConstantAction:
     """
 
     action: float
+    name: str = "constant"
 
     @property
-    def name(self) -> str:
-        return f"constant_a{self.action:.2f}"
+    def params(self) -> dict:
+        return {"action": float(self.action)}
 
     @property
     def initial_action(self) -> float:
@@ -129,6 +138,7 @@ def make_controller(args: argparse.Namespace) -> Controller:
 class Rollout:
     """What one episode produced. Nothing here is aggregated yet."""
 
+    reset_info: dict = field(default_factory=dict)
     infos: list[dict] = field(default_factory=list)
     rewards: list[float] = field(default_factory=list)
     observations: list[np.ndarray] = field(default_factory=list)
@@ -145,9 +155,11 @@ def rollout(
     if initial_action is not None:
         options["action_init"] = float(initial_action)
 
-    obs, _ = env.reset(seed=seed, options=options)
+    obs, reset_info = env.reset(seed=seed, options=options)
     rec = Rollout(
-        lambdas=[] if hasattr(controller, "lambda_value") else None, current=env.current.copy()
+        reset_info=dict(reset_info),
+        lambdas=[] if hasattr(controller, "lambda_value") else None,
+        current=env.current.copy(),
     )
     done = False
     while not done:
@@ -222,8 +234,14 @@ def git_commit(root: Path = REPO_ROOT) -> str:
 
 
 def config_sha256(path: Path) -> str:
-    """sha256 of the resolved config file's bytes, as the viewer displays it."""
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    """sha256 of the resolved config file, over LF-normalised bytes.
+
+    Normalising the newlines is what makes the hash a statement about the
+    config rather than about the checkout: git hands a Windows working tree
+    CRLF and Linux CI LF for the same committed file, and an unnormalised hash
+    would differ between them for configs that are in fact identical.
+    """
+    return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def build_trace(
@@ -265,6 +283,15 @@ def build_trace(
     if rec.lambdas is not None:
         series["lambda"] = [float(v) for v in rec.lambdas]
 
+    # The state at t = 0, straight from the reset info. The series start one
+    # control step in, so without this the viewer's opening beat would have
+    # nothing to draw at the moment the episode begins.
+    initial = {
+        "t_s": 0.0,
+        "T_cells_C": np.asarray(rec.reset_info["T_cells"], dtype=float).tolist(),
+        "mdot": float(rec.reset_info["mdot"]),
+    }
+
     # Summaries are read back off the series above, so a trace cannot disagree
     # with itself. The definitions match scripts/plot_constant_flow.py.
     summary = {
@@ -299,6 +326,7 @@ def build_trace(
             },
             "run": {
                 "controller": controller.name,
+                "controller_params": dict(getattr(controller, "params", {})),
                 "obs_mode": env.obs_mode,
                 "seed": int(seed),
                 "split": split,
@@ -306,16 +334,25 @@ def build_trace(
                 "mismatch_scale": float(env.cfg["mismatch"]["scale"]),
             },
         },
-        "episode": {"n_steps": n_steps, "summary": summary},
+        "episode": {"n_steps": n_steps, "initial": initial, "summary": summary},
         "series": series,
     }
 
 
 def trace_name(trace: dict) -> str:
-    """Default file stem, in the style of the design document's ``source_csv``."""
+    """Default file stem, in the style of the design document's ``source_csv``.
+
+    The controller's parameters are part of the stem, so two runs of the same
+    controller at different settings cannot overwrite each other. They are read
+    from ``controller_params``; nothing parses them back out of the name.
+    """
     run = trace["meta"]["run"]
+    params = "".join(
+        f"_{key}{value:g}" if isinstance(value, (int, float)) else f"_{key}{value}"
+        for key, value in sorted(run["controller_params"].items())
+    )
     return (
-        f"{run['controller']}_{run['obs_mode']}_seed{run['seed']}"
+        f"{run['controller']}{params}_{run['obs_mode']}_seed{run['seed']}"
         f"_{run['split']}{run['profile_index']:02d}"
     )
 
@@ -326,6 +363,7 @@ def manifest_entry(trace: dict, file_name: str) -> dict:
     return {
         "file": file_name,
         "controller": run["controller"],
+        "controller_params": run["controller_params"],
         "obs_mode": run["obs_mode"],
         "seed": run["seed"],
         "split": run["split"],
@@ -355,7 +393,14 @@ def rebuild_manifest(directory: Path) -> dict:
             continue
         entries.append(manifest_entry(trace, path.name))
     entries.sort(
-        key=lambda e: (e["controller"], e["obs_mode"], e["split"], e["profile_index"], e["seed"])
+        key=lambda e: (
+            e["controller"],
+            e["obs_mode"],
+            e["split"],
+            e["profile_index"],
+            e["seed"],
+            e["file"],  # a controller's parameters are not ordered; the file name is
+        )
     )
 
     manifest = {
