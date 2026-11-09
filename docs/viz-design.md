@@ -171,6 +171,7 @@ one logged quantity.** If a channel is not in this table, it is not allowed to v
 | Channel | Encodes | Domain |
 |---|---|---|
 | Cell fill colour | True cell temperature | Fixed `[30, 45] °C`, with an overflow colour above |
+| Cell height | True cell temperature, so the limit is a plane cells rise through rather than a number to read | Fixed `[30, 45] °C` |
 | Cell emissive intensity | Degrees above `T_max` | `[0, 5] K`, zero below the limit |
 | Cell outline pulse | Violation flag for this cell | Binary |
 | Cell opacity | Whether the controller can observe this cell | Binary: solid or ghosted |
