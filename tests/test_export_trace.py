@@ -290,6 +290,8 @@ def test_series_transcribe_the_env_info_dict(exported):
     assert series["rate_limited"] == [bool(i["rate_limited"]) for i in infos]
     for name, key in export_trace.ENERGY_FIELDS.items():
         np.testing.assert_allclose(series["energy_J"][name], [i[key] for i in infos])
+    for name, key in export_trace.SENSOR_FIELDS.items():
+        np.testing.assert_allclose(series["sensors"][name], [i[key] for i in infos])
 
 
 def test_current_series_is_the_profile_at_step_boundaries(exported):
@@ -334,43 +336,25 @@ def test_sensor_readings_are_the_noisy_ones_the_controller_saw(exported):
     truth = np.array(trace["series"]["T_cells_C"])[:, idx]
     read = np.array(trace["series"]["sensors"]["cells_C"])
     error = read - truth
+    assert np.all(error != 0.0)
     assert abs(error.mean()) < 0.1
     assert error.std() == pytest.approx(env.sigma_cell, rel=0.15)
     assert np.all(np.array(trace["series"]["sensors"]["T_in_C"]) > 0)
 
 
-def test_full_mode_sensor_readings_are_the_true_temperatures(tmp_path):
-    _, trace = export_to(tmp_path, "--obs-mode", "full")
+@pytest.mark.parametrize("mode", ["full", "partial_history"])
+def test_other_observation_modes_export_their_readings(mode, tmp_path):
+    _, trace = export_to(tmp_path, "--obs-mode", mode)
     idx = trace["meta"]["env"]["sensor_cells"]
     truth = np.array(trace["series"]["T_cells_C"])[:, idx]
     read = np.array(trace["series"]["sensors"]["cells_C"])
-    # float32 observations, so the inverse scaling round-trips to ~1e-5 K.
-    np.testing.assert_allclose(read, truth, atol=1e-4)
     assert {len(row) for row in trace["series"]["sensors"]["cells_C"]} == {len(idx)}
-
-
-def test_history_mode_decodes_the_newest_frame_of_the_stack():
-    """Temperatures move slowly, so only a synthetic stack can prove which frame is read."""
-    env = BatteryPackCoolingEnv(obs_mode="partial_history", split="test")
-    k = len(env.sensor_idx)
-
-    def frame(T):
-        return np.concatenate([np.full(k + 2, (T - env.T_ref) / env.T_scale), [0.0, 0.0, 0.0]])
-
-    obs = np.concatenate([frame(31.0)] * (env.history_len - 1) + [frame(42.0)])
-    cells, T_in, T_out = export_trace.sensor_readings(env, obs)
-    assert cells == pytest.approx([42.0] * k)
-    assert (T_in, T_out) == pytest.approx((42.0, 42.0))
-
-
-def test_history_mode_exports_like_the_other_partial_modes(tmp_path):
-    _, trace = export_to(tmp_path, "--obs-mode", "partial_history")
-    idx = trace["meta"]["env"]["sensor_cells"]
-    assert {len(row) for row in trace["series"]["sensors"]["cells_C"]} == {len(idx)}
-    error = np.array(trace["series"]["sensors"]["cells_C"]) - np.array(
-        trace["series"]["T_cells_C"]
-    )[:, idx]
-    assert error.std() == pytest.approx(0.5, rel=0.3)  # sensor noise, not a decoding error
+    if mode == "full":
+        # No noise in this mode, and the readings are logged rather than decoded
+        # from a float32 observation, so they are exactly the truth.
+        np.testing.assert_array_equal(read, truth)
+    else:
+        assert (read - truth).std() == pytest.approx(0.5, rel=0.3)  # one sigma_cell
 
 
 # ------------------------------------------------------------------- manifest

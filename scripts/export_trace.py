@@ -7,10 +7,11 @@ from the trace files on disk so lab mode's selector is generated rather than
 hardcoded.
 
 Every number in a trace is either copied straight out of the environment's
-``info`` dict or derived from it by one explicit step: a unit change, a sum over
-the episode, or the inverse of the observation scaling documented in
-``battery_pack.py``. Nothing is hand-typed, and nothing is interpolated or
-resampled. Blocks whose data does not exist (``series.estimate`` without a
+``info`` dict or derived from it by one explicit step: a unit change or a sum
+over the episode. Nothing is hand-typed, and nothing is interpolated or
+resampled. The sensor readings, noise included, are logged by the environment
+itself, so ``series.sensors`` is a copy of what the controller was shown rather
+than a reconstruction of it. Blocks whose data does not exist (``series.estimate`` without a
 Kalman filter, ``series.lambda`` without a Lagrange multiplier) are **absent,
 not null-filled**, so the viewer's layer has nothing to draw and hides itself.
 
@@ -66,6 +67,7 @@ SCALAR_FIELDS = {
     "spread_K": "spread",
 }
 VECTOR_FIELDS = {"T_cells_C": "T_cells", "T_coolant_C": "T_coolant"}
+SENSOR_FIELDS = {"cells_C": "sensor_T_cells", "T_in_C": "sensor_T_in", "T_out_C": "sensor_T_out"}
 ENERGY_FIELDS = {
     "gen": "energy_gen_J",
     "cool": "energy_cool_J",
@@ -141,7 +143,6 @@ class Rollout:
     reset_info: dict = field(default_factory=dict)
     infos: list[dict] = field(default_factory=list)
     rewards: list[float] = field(default_factory=list)
-    observations: list[np.ndarray] = field(default_factory=list)
     lambdas: list[float] | None = None
     current: np.ndarray = field(default_factory=lambda: np.empty(0))
 
@@ -149,7 +150,7 @@ class Rollout:
 def rollout(
     env: BatteryPackCoolingEnv, controller: Controller, *, seed: int, profile_index: int
 ) -> Rollout:
-    """Run one episode, keeping the post-step info, reward and observation."""
+    """Run one episode, keeping the reset info and every post-step info and reward."""
     options: dict = {"profile_index": profile_index}
     initial_action = getattr(controller, "initial_action", None)
     if initial_action is not None:
@@ -166,7 +167,6 @@ def rollout(
         obs, reward, terminated, truncated, info = env.step(controller(obs))
         rec.infos.append(info)
         rec.rewards.append(float(reward))
-        rec.observations.append(np.asarray(obs, dtype=float))
         if rec.lambdas is not None:
             rec.lambdas.append(float(controller.lambda_value()))
         done = terminated or truncated
@@ -183,26 +183,6 @@ def _scalars(infos: list[dict], key: str) -> list:
 
 def _vectors(infos: list[dict], key: str) -> list[list[float]]:
     return [np.asarray(i[key], dtype=float).tolist() for i in infos]
-
-
-def sensor_readings(
-    env: BatteryPackCoolingEnv, obs: np.ndarray
-) -> tuple[list[float], float, float]:
-    """Undo the observation scaling to recover what the sensors reported, in degC.
-
-    The environment never puts its sensor readings in ``info``; they exist only
-    inside the observation, as ``(T - T_ref) / T_scale``. Inverting that is the
-    only way to log what the controller actually saw, noise included. Under
-    ``partial_history`` the newest frame is the last base block of the stack.
-    Under ``full`` the environment adds no sensor noise, so these are the true
-    temperatures at the sensed cells.
-    """
-    n_temps = env.n if env.obs_mode == "full" else len(env.sensor_idx)
-    base = np.asarray(obs, dtype=float)[-(n_temps + 5) :]
-    temps = base[:n_temps] * env.T_scale + env.T_ref
-    T_in, T_out = base[n_temps : n_temps + 2] * env.T_scale + env.T_ref
-    cells = temps if env.obs_mode != "full" else temps[env.sensor_idx]
-    return [float(v) for v in cells], float(T_in), float(T_out)
 
 
 def estimate_block(obs_mode: str, infos: list[dict]) -> dict | None:
@@ -271,11 +251,12 @@ def build_trace(
     series.update({name: _scalars(infos, key) for name, key in SCALAR_FIELDS.items()})
     series["energy_J"] = {name: _scalars(infos, key) for name, key in ENERGY_FIELDS.items()}
 
-    readings = [sensor_readings(env, obs) for obs in rec.observations]
+    # The env logs the readings the controller was shown, noise sample included,
+    # so this block is a copy rather than a reconstruction.
     series["sensors"] = {
-        "cells_C": [r[0] for r in readings],
-        "T_in_C": [r[1] for r in readings],
-        "T_out_C": [r[2] for r in readings],
+        "cells_C": _vectors(infos, SENSOR_FIELDS["cells_C"]),
+        "T_in_C": _scalars(infos, SENSOR_FIELDS["T_in_C"]),
+        "T_out_C": _scalars(infos, SENSOR_FIELDS["T_out_C"]),
     }
     estimate = estimate_block(env.obs_mode, infos)
     if estimate is not None:

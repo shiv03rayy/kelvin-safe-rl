@@ -21,3 +21,10 @@ Thumbs.db
 # Claude Code
 .claude/worktrees/
 .claude/settings.local.json
+
+# Exported viewer traces: regenerable from scripts/export_trace.py, and they
+# multiply with every controller, seed and profile. One trace is committed as a
+# fixture for the viewer's loader; add a line here to keep another.
+results/traces/*.json
+!results/traces/manifest.json
+!results/traces/constant_action0.3_partial_seed0_test07.json
