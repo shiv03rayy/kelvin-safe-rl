@@ -16,6 +16,9 @@ dependencies = [
     "pyyaml==6.0.3",
     "pandas==3.1.1",
     "matplotlib==3.11.2",
+    # M3 onward: the PPO and PPO-Lagrangian agents. CPU-only is sufficient --
+    # the networks are small MLPs and the env is the bottleneck, not the gradients.
+    "torch==2.14.1",
 ]
 
 [project.optional-dependencies]
