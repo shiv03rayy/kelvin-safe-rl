@@ -2,7 +2,7 @@
 
 **Safe reinforcement learning with Kalman state estimation for battery thermal management**
 
-> **Status: early development.** The simulated environment and its physics tests exist; the controllers, the Kalman filter and the RL agents do not yet. This README describes the design and the planned experiments. It has no results section yet: results will only appear here once a script has generated them from logged data in `results/`. See the [roadmap](#roadmap) for progress.
+> **Status: early development.** The simulated environment, its physics tests and the classical baselines exist and are evaluated on held-out profiles; the Kalman filter and the RL agents do not yet. This README describes the design and the planned experiments. It has no results section yet: the per-episode baseline data is in `results/m2_baselines_test.csv`, but no number appears here until a script renders it, which is milestone M5. See the [roadmap](#roadmap) for progress.
 
 Kelvin is an open-source research prototype for **safety-constrained control under partial observability**. A reinforcement learning agent controls the coolant flow through a simulated battery pack. It has to keep every cell below a temperature limit while using as little pumping energy as possible. Only a few cells have sensors, and those sensors are noisy, so a Kalman filter built from the pack's physics model estimates the hidden cell temperatures, and the controller acts on those estimates.
 
@@ -166,7 +166,7 @@ Rerun E1–E3 with **10 or more seeds**, and report interquartile mean (IQM) wit
 
 ## Repository layout
 
-The planned structure (most of these files do not exist yet):
+The planned structure. `envs/`, `control/`, `eval/metrics.py` and their tests exist; `estimation/`, `agents/` and `eval/stats.py` do not yet:
 
 ```
 kelvin-safe-rl/
@@ -214,7 +214,10 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
-pytest                                                   # physics and API sanity tests
+pytest                                                   # physics, API and baseline tests
+
+python scripts/tune_baselines.py                         # tunes on training profiles only
+python scripts/evaluate_baselines.py                     # writes results/m2_baselines_test.csv
 python scripts/train.py --agent ppo_lagrangian --obs-mode full --seed 0 --config configs/env_default.yaml
 python scripts/run_experiment.py configs/experiments/e1.yaml
 python scripts/make_figures.py
@@ -225,8 +228,8 @@ python scripts/make_figures.py
 ## Roadmap
 
 - [x] **M0:** Repository scaffold, pinned dependencies, config system, CI running `pytest`
-- [ ] **M1 (built, parameters under review):** Physics, environment and load profiles, with sanity tests for energy balance, equilibrium, monotonicity, the spatial gradient, the Gymnasium API and the rate limit. Sanity figure: `python scripts/plot_constant_flow.py`
-- [ ] **M2:** Classical baselines evaluated on held-out profiles
+- [x] **M1:** Physics, environment and load profiles, with sanity tests for energy balance, equilibrium, monotonicity, the spatial gradient, the Gymnasium API and the rate limit. Sanity figure: `python scripts/plot_constant_flow.py`
+- [x] **M2:** Classical baselines (constant, thermostat, thermostat with margin, PID) tuned on training profiles and evaluated on held-out profiles over 5 seeds × 20 profiles × 2 observation modes
 - [ ] **M3:** PPO-penalty and PPO-Lagrangian on `full` observations, at least 5 seeds (E1, E2)
 - [ ] **M4:** Partial observability and the Kalman filter (E3, E4)
 - [ ] **M5:** Results and limitations written up from generated data
