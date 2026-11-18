@@ -281,9 +281,11 @@ Rules:
   JSON only, so it does not appear there; it exists for runs that also log a CSV alongside.
 - **A committed trace's `git_commit` does not survive a rebase.** It names the commit the trace was
   exported on top of, which cannot be the commit containing it, and a rebase orphans it entirely.
-  This is one reason only a single trace is committed as a fixture while the rest are generated:
-  a fixture's pointer is a development convenience, not a provenance guarantee. For traces that
-  back anything published, regenerate rather than commit.
+  This is one reason only a handful of traces are committed as fixtures while the rest are
+  generated: a fixture's pointer is a development convenience, not a provenance guarantee. For
+  traces that back anything published, regenerate rather than commit. The four that are committed
+  are named in `.gitignore`, and three of them are the constant-flow sweep the opening beats compare
+  across; everything else under `results/traces/` is ignored.
 - **A controller's parameters live in `controller_params`, never in its name.** `controller` is the
   bare family (`constant`, `thermostat`, `pid`, `ppo_lagrangian`) and `controller_params` carries
   the arguments (`{"action": 0.3}`), empty for a controller that takes none. Encoding arguments into
