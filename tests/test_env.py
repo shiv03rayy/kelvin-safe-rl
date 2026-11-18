@@ -38,6 +38,59 @@ def test_partial_observation_is_noisy_but_unbiased():
     assert errors.std() == pytest.approx(env.sigma_cell, rel=0.15)
 
 
+def decode_newest_temperatures(env, obs):
+    """Invert the observation scaling on the newest frame: what the agent was shown."""
+    n_temps = env.n if env.obs_mode == "full" else len(env.sensor_idx)
+    base = np.asarray(obs, dtype=float)[-(n_temps + 5) :]
+    return base[:n_temps] * env.T_scale + env.T_ref, base[n_temps : n_temps + 2] * env.T_scale + env.T_ref
+
+
+@pytest.mark.parametrize("mode", ["partial", "partial_history"])
+def test_logged_sensor_readings_are_the_ones_the_agent_was_shown(mode):
+    """The log must be a record of the run, not a redraw from the same distribution."""
+    env = BatteryPackCoolingEnv(obs_mode=mode)
+    obs, info = env.reset(seed=0)
+    for _ in range(20):
+        temps, (T_in, T_out) = decode_newest_temperatures(env, obs)
+        # float32 observations, so the round trip is exact only to ~1e-5 K.
+        np.testing.assert_allclose(info["sensor_T_cells"], temps, atol=1e-4)
+        assert info["sensor_T_in"] == pytest.approx(T_in, abs=1e-4)
+        assert info["sensor_T_out"] == pytest.approx(T_out, abs=1e-4)
+        obs, _, _, _, info = env.step(np.array([0.5], dtype=np.float32))
+
+
+def test_logged_sensor_readings_carry_the_noise():
+    """In a partial mode the readings are noisy, and noisy by the configured amount."""
+    env = BatteryPackCoolingEnv(obs_mode="partial")
+    errors = []
+    for seed in range(300):
+        _, info = env.reset(seed=seed)
+        errors.append(info["sensor_T_cells"] - info["T_cells"][env.sensor_idx])
+    errors = np.array(errors)
+    assert np.all(errors != 0.0)
+    assert abs(errors.mean()) < 0.1
+    assert errors.std() == pytest.approx(env.sigma_cell, rel=0.15)
+
+
+def test_full_mode_logs_noiseless_readings():
+    """``full`` adds no noise, so the readings are the truth at the sensed cells."""
+    env = BatteryPackCoolingEnv(obs_mode="full")
+    _, info = env.reset(seed=0)
+    for _ in range(5):
+        np.testing.assert_array_equal(info["sensor_T_cells"], info["T_cells"][env.sensor_idx])
+        assert info["sensor_T_in"] == env.params.T_in
+        if "T_coolant" in info:
+            assert info["sensor_T_out"] == pytest.approx(info["T_coolant"][-1])
+        _, _, _, _, info = env.step(np.array([0.5], dtype=np.float32))
+
+
+def test_sensor_readings_are_logged_at_reset_too():
+    env = BatteryPackCoolingEnv(obs_mode="partial")
+    _, info = env.reset(seed=0)
+    assert info["sensor_T_cells"].shape == (len(env.sensor_idx),)
+    assert np.isfinite([info["sensor_T_in"], info["sensor_T_out"]]).all()
+
+
 def test_rate_limit_is_never_exceeded():
     env = BatteryPackCoolingEnv()
     env.reset(seed=0)

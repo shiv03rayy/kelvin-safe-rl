@@ -14,6 +14,14 @@ Design choices worth knowing:
   normalised time, so comparing modes isolates the effect of observability.
 * **The actuator is rate-limited by the env**, not the agent. Any clipping is
   reported in ``info``.
+* **The sensor readings are logged, noise and all.** ``info["sensor_T_cells"]``,
+  ``info["sensor_T_in"]`` and ``info["sensor_T_out"]`` are the very values the
+  observation was built from -- the same noise sample, not a fresh draw -- so a
+  log is a record of what the controller saw rather than a plausible reenactment
+  of it. Under ``full`` observation mode the env adds no noise, and these are
+  then the true temperatures at the sensed cells and the true coolant inlet and
+  outlet. ``sensor_T_cells`` is always the reading at ``sensors.cell_indices``,
+  whatever the mode shows the agent.
 * **Episodes never terminate on a violation.** They are truncated when the
   load profile ends. Violations are priced through the cost signal instead.
 """
@@ -113,11 +121,20 @@ class BatteryPackCoolingEnv(gym.Env):
         T_in, T_out = self.params.T_in, T_c[-1]
         if self.obs_mode == "full":
             temps = self.T
+            sensed = self.T[self.sensor_idx]
         else:
             rng = self.np_random
             temps = self.T[self.sensor_idx] + self.sigma_cell * rng.standard_normal(len(self.sensor_idx))
             T_in = T_in + self.sigma_coolant * rng.standard_normal()
             T_out = T_out + self.sigma_coolant * rng.standard_normal()
+            sensed = temps
+        # Kept so that ``info`` can report the readings this observation was
+        # built from. Nothing is re-sampled: the noise above is drawn once.
+        self.readings = {
+            "sensor_T_cells": np.array(sensed, dtype=float),
+            "sensor_T_in": float(T_in),
+            "sensor_T_out": float(T_out),
+        }
         I = self.current[min(self.k, len(self.current) - 1)]
         return np.concatenate(
             [
@@ -160,7 +177,8 @@ class BatteryPackCoolingEnv(gym.Env):
         self.k = 0
         self.step_idx = 0
         self.history = deque(maxlen=self.history_len)
-        return self._obs(), self._info_reset()
+        obs = self._obs()  # before _info_reset: it reports this observation's readings
+        return obs, self._info_reset()
 
     def step(self, action):
         a = float(np.asarray(action, dtype=float).reshape(-1)[0])
@@ -204,11 +222,15 @@ class BatteryPackCoolingEnv(gym.Env):
             "stored_change_J": float(np.sum(self.params.C_cell * (self.T - T_start))),
             "profile_index": self.profile_index,
         }
-        return self._obs(), float(reward), False, truncated, info
+        obs = self._obs()
+        info.update(self.readings)  # the readings that observation was built from
+        return obs, float(reward), False, truncated, info
 
     def _info_reset(self) -> dict:
+        """Called after :meth:`_obs`, so ``self.readings`` belongs to the reset observation."""
         return {
             "T_cells": self.T.copy(),
             "mdot": self.mdot,
             "profile_index": self.profile_index,
+            **self.readings,
         }

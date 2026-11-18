@@ -8,7 +8,11 @@ Kelvin is an open-source research prototype for **safety-constrained control und
 
 The project compares a standard RL agent (PPO with a fixed cost penalty) against a constrained one (PPO-Lagrangian) and against classical controllers, with every configuration run over multiple random seeds.
 
-SEE IT LIVE HERE: https://claude.ai/artifact/4kKdHeLqXL3jvY4EJngq76
+**See it running:** an interactive 3D viewer of a logged episode is published at
+[claude.ai/artifact/4kKdHeLqXL3jvY4EJngq76](https://claude.ai/artifact/4kKdHeLqXL3jvY4EJngq76). It
+replays traces exported from this repository and simulates nothing in the browser; the source is in
+[`viz/`](viz/) and the design is argued in [`docs/viz-design.md`](docs/viz-design.md).
+
 ---
 
 ## Contents
@@ -166,7 +170,7 @@ Rerun E1–E3 with **10 or more seeds**, and report interquartile mean (IQM) wit
 
 ## Repository layout
 
-The planned structure. `envs/`, `control/`, `eval/metrics.py` and their tests exist; `estimation/`, `agents/` and `eval/stats.py` do not yet:
+The planned structure. `envs/`, `control/`, `eval/metrics.py`, the trace exporter, the viewer and their tests exist; `estimation/`, `agents/` and `eval/stats.py` do not yet:
 
 ```
 kelvin-safe-rl/
@@ -194,9 +198,13 @@ kelvin-safe-rl/
 │   ├── evaluate.py            # writes results/*.csv
 │   ├── run_experiment.py      # loops over the seeds and configs in an experiment file
 │   └── make_figures.py        # generates every figure in this README
+├── scripts/export_trace.py    # writes kelvin.trace/1 episodes for the viewer
 ├── tests/
 ├── results/                   # raw per-seed CSV logs, committed
-└── figures/
+│   └── traces/                # exported episodes for the viewer (four committed)
+├── figures/
+├── docs/viz-design.md         # the viewer's design document
+└── viz/index.html             # the V0 viewer: Three.js, no build step
 ```
 
 The import name is `kelvin_rl`, because `kelvin` is already taken on PyPI by an unrelated project.
@@ -236,6 +244,16 @@ python scripts/make_figures.py
 - [ ] **Extension:** 10+ seed study with IQM, bootstrap CIs, probability of improvement and rank stability
 - [ ] **Stretch:** Joint state and parameter estimation (augmented-state EKF) or a hybrid physics + neural-network estimator, with an ablation
 - [ ] **Stretch:** Domain randomisation of physics parameters during training
+
+The viewer has its own stages, tied to the milestones above and never on their critical path,
+because it only ever consumes exported traces:
+
+- [x] **V0:** Trace exporter (`kelvin.trace/1`), the loader, and the pack, coolant and limit-plane
+  layers with a scrubber over a logged episode
+- [ ] **V1:** Comparison rail, heat ledger and actuation layer, once M2 baselines are traced
+- [ ] **V2:** PPO and PPO-Lagrangian in the rail, Pareto flythrough, multiplier layer (needs M3)
+- [ ] **V3:** Estimate layer with ±2σ shells (needs M4)
+- [ ] **V4:** In-browser sandbox behind a golden-vector parity gate against the NumPy environment
 
 ---
 
